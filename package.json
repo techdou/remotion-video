@@ -1,0 +1,28 @@
+{
+  "name": "remotion-video-server",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Agent-driven project service for Remotion video generation",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch & node dist/index.js",
+    "start": "node dist/index.js",
+    "mcp": "node dist/mcp.js",
+    "api": "node dist/api.js",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test dist/**/*.test.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "better-sqlite3": "^11.7.0",
+    "express": "^4.21.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.0",
+    "tsup": "^8.3.0",
+    "typescript": "^5.7.0"
+  }
+}
