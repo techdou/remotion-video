@@ -12,6 +12,15 @@ async function api(path, options = {}) {
   return data;
 }
 
+// ── Hooks ───────────────────────────────────────────────
+function useEscapeKey(onClose) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+}
+
 // ── Icon helpers ────────────────────────────────────────
 function StepIcon({ status }) {
   if (status === "done") return <span style={{color: "white", fontSize: "10px"}}>✓</span>;
@@ -79,6 +88,7 @@ function LogPanel({ logs }) {
 
 // ── Config Modal ────────────────────────────────────────
 function ConfigModal({ onClose, onSave }) {
+  useEscapeKey(onClose);
   const [config, setConfig] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -132,7 +142,7 @@ function ConfigModal({ onClose, onSave }) {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>⚙️ 配置</h2>
+        <h2>配置</h2>
 
         <div className="section-title">TTS 语音合成</div>
         <div className="modal-field">
@@ -212,6 +222,7 @@ function ConfigModal({ onClose, onSave }) {
 
 // ── Init Modal ──────────────────────────────────────────
 function InitModal({ onClose, onInitiated }) {
+  useEscapeKey(onClose);
   const [srtPath, setSrtPath] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -322,17 +333,36 @@ function App() {
       }
     });
 
+    // SSE 断线兜底
+    es.addEventListener("error", () => {
+      if (es.readyState === EventSource.CLOSED) {
+        setLogs((prev) => [...prev, {
+          level: "error",
+          message: "实时连接已断开，请刷新页面",
+          timestamp: new Date().toISOString(),
+        }]);
+      }
+    });
+
     return () => es.close();
   }, [currentProject]);
 
   // ── Actions ─────────────────────────────────
+  const [toast, setToast] = useState(null);
+  const showToast = (msg, level = "error") => {
+    setToast({ message: msg, level, ts: Date.now() });
+    setTimeout(() => setToast(null), 5000);
+  };
+
   const runAction = async (endpoint, body = {}, label = "执行") => {
-    if (!currentProject) return;
+    if (!currentProject || busy) return;
     setBusy(true);
     try {
       await api(endpoint, { method: "POST", body: JSON.stringify({ projectRoot: currentProject, ...body }) });
+      showToast(`${label}完成`, "info");
     } catch (err) {
       setLogs((prev) => [...prev, { level: "error", message: `${label}失败: ${err.message}`, timestamp: new Date().toISOString() }]);
+      showToast(`${label}失败: ${err.message}`, "error");
     }
     setBusy(false);
   };
@@ -346,7 +376,7 @@ function App() {
       {/* Header */}
       <div className="header">
         <div className="header-left">
-          <h1>🎬 Remotion Video 控制台</h1>
+          <h1>Remotion Video 控制台</h1>
         </div>
         <div className="header-right">
           <input
@@ -370,7 +400,7 @@ function App() {
             ))}
           </select>
           <button className="btn btn-primary" onClick={() => setShowInit(true)}>新建</button>
-          <button className="btn" onClick={() => setShowConfig(true)}>⚙️</button>
+          <button className="btn" onClick={() => setShowConfig(true)}>配置</button>
         </div>
       </div>
 
@@ -476,7 +506,7 @@ function App() {
                       href={`/api/video/${encodeURIComponent(currentProject)}`}
                       download="output.mp4"
                     >
-                      ⬇ 下载 MP4 ({video.sizeMB} MB)
+                      下载 MP4 ({video.sizeMB} MB)
                     </a>
                   </div>
                 </>
@@ -491,6 +521,13 @@ function App() {
           <LogPanel logs={logs} />
         </div>
       </div>
+
+      {/* Toast */}
+      {toast && (
+        <div className={`toast ${toast.level}`}>
+          {toast.message}
+        </div>
+      )}
 
       {/* Modals */}
       {showConfig && <ConfigModal onClose={() => setShowConfig(false)} onSave={() => {}} />}

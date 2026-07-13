@@ -10,7 +10,7 @@
     python3 generate-speech.py subtitle.srt ./speech/
 
 配置 (skill 根目录 .env):
-    TTS_PROVIDER=openai|edge  (默认 openai)
+    TTS_PROVIDER=openai|edge|mimo  (默认 openai)
     # OpenAI 兼容:
     TTS_API_KEY=...
     TTS_BASE_URL=https://api.openai.com/v1

@@ -59,8 +59,9 @@ function decodePath(encoded) {
 /** 验证路径在允许的项目基目录下（防路径穿越）*/
 function validateProjectPath(projectRoot) {
   const resolved = resolve(projectRoot);
-  // 必须包含 remotion-video-projects 段，防止 ../ 穿越
-  if (!resolved.includes("remotion-video-projects")) {
+  // 精确匹配：projectRoot 的父目录必须叫 remotion-video-projects
+  const parentName = basename(dirname(resolved));
+  if (parentName !== "remotion-video-projects") {
     throw new Error("非法项目路径");
   }
   return resolved;
@@ -176,7 +177,13 @@ app.put("/api/config", (req, res) => {
     if (typeof value === "string" && value.endsWith("***")) continue;
     // 拒绝换行符（防 .env 注入）
     if (typeof value === "string" && /[\n\r]/.test(value)) continue;
-    merged[key] = value;
+    // 强制类型：非字符串值转 string，null/对象/数组跳过
+    if (typeof value === "number" || typeof value === "boolean") {
+      merged[key] = String(value);
+    } else if (typeof value === "string") {
+      merged[key] = value;
+    }
+    // null / object / array → 跳过
   }
 
   // 重写 .env：保留原有注释行，更新已知 key，追加新 key
@@ -438,10 +445,14 @@ app.get("/api/events", (req, res) => {
   res.write("\n");
 
   const sendEvent = (type, data) => {
-    // 如果指定了 projectRoot，只推该项目的消息
-    if (targetRoot && data.projectRoot && data.projectRoot !== targetRoot) return;
-    res.write(`event: ${type}\n`);
-    res.write(`data: ${JSON.stringify(data)}\n\n`);
+    if (res.writableEnded) return;
+    try {
+      if (targetRoot && data.projectRoot && data.projectRoot !== targetRoot) return;
+      res.write(`event: ${type}\n`);
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+    } catch {
+      // 连接已断，静默；req close 会清理
+    }
   };
 
   const onState = (data) => sendEvent("state", data);

@@ -5,8 +5,8 @@
   --border: #2a2e3c;
   --text: #e4e6eb;
   --text-dim: #8b8fa3;
-  --accent: #6366f1;
-  --accent-dim: #4f46e5;
+  --accent: #38bdf8;
+  --accent-dim: #0ea5e9;
   --success: #10b981;
   --warning: #f59e0b;
   --error: #ef4444;
@@ -254,3 +254,34 @@ select:focus, input:focus, textarea:focus {
   border-bottom: 1px solid var(--border);
 }
 .section-title:first-child { margin-top: 0; }
+
+/* ── Toast ─────────────────────────────────────────── */
+.toast {
+  position: fixed;
+  top: 60px;
+  right: 20px;
+  z-index: 200;
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  max-width: 400px;
+  animation: toast-in 0.2s ease;
+}
+.toast.error { background: var(--error); color: white; }
+.toast.info { background: var(--accent); color: #0f1117; }
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ── 暗色 select option ────────────────────────────── */
+select option {
+  background: var(--bg-card);
+  color: var(--text);
+}
+
+/* ── 无障碍 ────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .step-icon.running { animation: none; }
+  .toast { animation: none; }
+}

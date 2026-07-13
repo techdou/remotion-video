@@ -5,7 +5,7 @@
  * Agent 和 Web 都读写这个文件。
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { EventEmitter } from "node:events";
 
@@ -63,7 +63,10 @@ export function writeState(projectRoot, updater) {
 
   state.updatedAt = new Date().toISOString();
   mkdirSync(dirname(statePath), { recursive: true });
-  writeFileSync(statePath, JSON.stringify(state, null, 2), "utf-8");
+  // 原子写：先写 tmp 再 rename，避免读到半截 JSON
+  const tmpPath = statePath + ".tmp";
+  writeFileSync(tmpPath, JSON.stringify(state, null, 2), "utf-8");
+  renameSync(tmpPath, statePath);
 
   // 推送状态变更事件
   events.emit("state", { projectRoot, state });

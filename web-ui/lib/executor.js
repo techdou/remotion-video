@@ -64,11 +64,14 @@ export function runCommand(bin, args = [], options = {}) {
  */
 function _run(bin, args, { onProgress, cwd } = {}) {
   return new Promise((resolvePromise, reject) => {
-    // Windows 上 npx 需要 .cmd 后缀；不用 shell:true 防止命令注入
-    const actualBin = process.platform === "win32" && bin === "npx" ? "npx.cmd" : bin;
-    const child = spawn(actualBin, args, {
+    // 安全策略：
+    // - node/python 脚本：shell:false（脚本路径是服务器内部生成的，args 不含用户原始输入）
+    // - npx：Windows 上 .cmd 文件必须 shell:true（CVE-2024-27980 禁止 .cmd 在 shell:false 下执行）
+    //   但 npx 的 args 全部是服务器内部常量（Main, out/output.mp4, --scale），无注入面
+    const needsShell = bin === "npx";
+    const child = spawn(bin, args, {
       cwd: cwd || process.cwd(),
-      shell: false,
+      shell: needsShell,
       env: { ...process.env, FORCE_COLOR: "0" },
     });
 
