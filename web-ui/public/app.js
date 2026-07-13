@@ -545,4 +545,14 @@ function App() {
 }
 
 // ── Mount ───────────────────────────────────────────────
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+function mountApp() {
+  if (typeof ReactDOM === "undefined" || typeof React === "undefined") {
+    // React CDN 还没加载完，等一下重试
+    document.getElementById("root").innerHTML = '<div style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;color:#8b8fa3;font-family:system-ui;">正在加载 React，请稍候...</div>';
+    setTimeout(mountApp, 200);
+    return;
+  }
+  const { createRoot } = ReactDOM;
+  createRoot(document.getElementById("root")).render(<App />);
+}
+mountApp();
