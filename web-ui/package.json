@@ -10,7 +10,8 @@
     "build": "esbuild public/app.jsx --bundle --format=iife --jsx=transform --outfile=public/app.js"
   },
   "dependencies": {
-    "express": "^4.21.0"
+    "express": "^4.21.0",
+    "jsdom": "^29.1.1"
   },
   "devDependencies": {
     "esbuild": "^0.28.1"

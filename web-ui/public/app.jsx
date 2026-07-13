@@ -3,7 +3,6 @@ const { useState, useEffect, useRef, useCallback } = React;
 // ── API helper ──────────────────────────────────────────
 async function api(path, options = {}) {
   const res = await fetch(path, {
-    "Content-Type": "application/json",
     ...options,
     headers: { "Content-Type": "application/json", ...(options.headers || {}) },
   });
@@ -21,59 +20,65 @@ function useEscapeKey(onClose) {
   }, [onClose]);
 }
 
-// ── Icon helpers ────────────────────────────────────────
-function StepIcon({ status }) {
-  if (status === "done") return <span style={{color: "white", fontSize: "10px"}}>✓</span>;
-  if (status === "running") return <span style={{color: "white", fontSize: "10px"}}>●</span>;
-  if (status === "failed") return <span style={{color: "white", fontSize: "10px"}}>✗</span>;
-  return null;
+// ── 步骤编号 ─────────────────────────────────────────────
+function StepNumber({ index, status }) {
+  const num = String(index).padStart(2, "0");
+  return <span className={`step-number ${status || ""}`}>{num}</span>;
 }
 
-// ── Pipeline Step Component ─────────────────────────────
-function PipelineStep({ name, title, detail, step, onAction, actionLabel, disabled }) {
+// ── Pipeline 步骤组件 ────────────────────────────────────
+function PipelineStep({ index, title, detail, step, onAction, actionLabel, disabled, children }) {
   const status = step?.status || "pending";
   return (
     <div className="step">
-      <div className={`step-icon ${status}`}>
-        <StepIcon status={status} />
-      </div>
+      <StepNumber index={index} status={status} />
       <div className="step-content">
         <div className="step-title">{title}</div>
         {detail && <div className="step-detail">{detail}</div>}
-        {step?.error && <div className="step-detail" style={{color: "var(--error)"}}>{step.error.slice(0, 80)}</div>}
+        {step?.error && <div className="step-error">{step.error.slice(0, 100)}</div>}
         {onAction && (
           <div className="step-actions">
-            <button className="btn" onClick={onAction} disabled={disabled || status === "running"}>
-              {status === "running" ? "执行中..." : actionLabel}
+            <button
+              className="btn"
+              onClick={onAction}
+              disabled={disabled || status === "running"}
+            >
+              {status === "running" ? "执行中…" : actionLabel}
             </button>
           </div>
         )}
+        {children}
       </div>
     </div>
   );
 }
 
-// ── Creator Card ────────────────────────────────────────
+// ── Creator 子卡片 ───────────────────────────────────────
 function CreatorCard({ creator }) {
   const status = creator.status || "pending";
-  const icons = { done: "✓", running: "●", failed: "✗", pending: "○" };
+  const labels = { done: "✓", running: "·", failed: "×", pending: "○" };
   return (
     <div className={`creator-card ${status}`}>
-      {icons[status]} {creator.id} ({creator.sceneIds?.length || 0} 场景)
+      {labels[status]} {creator.id} · {creator.sceneIds?.length || 0} 场景
     </div>
   );
 }
 
-// ── Log Panel ───────────────────────────────────────────
+// ── 日志面板 ─────────────────────────────────────────────
 function LogPanel({ logs }) {
   const ref = useRef(null);
   useEffect(() => {
-    if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
+    const el = ref.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    if (nearBottom) el.scrollTop = el.scrollHeight;
   }, [logs]);
   return (
     <div className="log-area" ref={ref}>
       {logs.length === 0 ? (
-        <div style={{color: "var(--text-dim)"}}>等待日志...</div>
+        <div style={{ color: "var(--text-dim)", fontStyle: "italic" }}>
+          日志将在此处实时显示…
+        </div>
       ) : (
         logs.map((entry, i) => (
           <div key={i} className={`log-line ${entry.level}`}>
@@ -86,7 +91,7 @@ function LogPanel({ logs }) {
   );
 }
 
-// ── Config Modal ────────────────────────────────────────
+// ── 配置模态框 ───────────────────────────────────────────
 function ConfigModal({ onClose, onSave }) {
   useEscapeKey(onClose);
   const [config, setConfig] = useState({});
@@ -94,17 +99,15 @@ function ConfigModal({ onClose, onSave }) {
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
+  const load = useCallback(() => {
+    setLoading(true);
+    setError(null);
     api("/api/config")
-      .then((data) => {
-        setConfig(data.config || {});
-        setLoading(false);
-      })
-      .catch((err) => {
-        setError(err.message);
-        setLoading(false);
-      });
+      .then((data) => { setConfig(data.config || {}); setLoading(false); })
+      .catch((err) => { setError(err.message); setLoading(false); });
   }, []);
+
+  useEffect(() => { load(); }, [load]);
 
   const update = (key, value) => setConfig({ ...config, [key]: value });
 
@@ -123,17 +126,7 @@ function ConfigModal({ onClose, onSave }) {
 
   if (loading) return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>加载中...</div>
-    </div>
-  );
-  if (error && !config.TTS_PROVIDER) return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <p style={{color: "var(--error)"}}>加载失败: {error}</p>
-        <div className="modal-actions">
-          <button className="btn" onClick={onClose}>关闭</button>
-        </div>
-      </div>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>加载中…</div>
     </div>
   );
 
@@ -141,14 +134,14 @@ function ConfigModal({ onClose, onSave }) {
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
         <h2>配置</h2>
 
         <div className="section-title">TTS 语音合成</div>
         <div className="modal-field">
           <label>Provider</label>
           <select value={ttsProvider} onChange={(e) => update("TTS_PROVIDER", e.target.value)}>
-            <option value="openai">OpenAI 兼容（官方/硅基/火山/OneAPI）</option>
+            <option value="openai">OpenAI 兼容（官方 / 硅基 / 火山 / OneAPI）</option>
             <option value="mimo">MiMo（小米）</option>
             <option value="edge">Edge TTS（免费本地）</option>
           </select>
@@ -158,7 +151,7 @@ function ConfigModal({ onClose, onSave }) {
           <>
             <div className="modal-field">
               <label>API Key</label>
-              <input type="password" value={config.TTS_API_KEY || ""} onChange={(e) => update("TTS_API_KEY", e.target.value)} placeholder="sk-..." />
+              <input type="password" value={config.TTS_API_KEY || ""} onChange={(e) => update("TTS_API_KEY", e.target.value)} placeholder="sk-…" />
             </div>
             <div className="modal-field">
               <label>Base URL</label>
@@ -208,11 +201,11 @@ function ConfigModal({ onClose, onSave }) {
           </div>
         )}
 
-        {error && <div style={{color: "var(--error)", fontSize: "13px", marginBottom: "8px"}}>{error}</div>}
+        {error && <div className="modal-error">{error}</div>}
         <div className="modal-actions">
           <button className="btn" onClick={onClose}>取消</button>
           <button className="btn btn-primary" onClick={save} disabled={saving}>
-            {saving ? "保存中..." : "保存"}
+            {saving ? "保存中…" : "保存"}
           </button>
         </div>
       </div>
@@ -220,7 +213,7 @@ function ConfigModal({ onClose, onSave }) {
   );
 }
 
-// ── Init Modal ──────────────────────────────────────────
+// ── 新建项目模态框 ───────────────────────────────────────
 function InitModal({ onClose, onInitiated }) {
   useEscapeKey(onClose);
   const [srtPath, setSrtPath] = useState("");
@@ -228,7 +221,7 @@ function InitModal({ onClose, onInitiated }) {
   const [error, setError] = useState(null);
 
   const start = async () => {
-    if (!srtPath.trim()) return setError("请输入 SRT 文件路径");
+    if (!srtPath.trim() || loading) return;
     setLoading(true);
     setError(null);
     try {
@@ -246,8 +239,8 @@ function InitModal({ onClose, onInitiated }) {
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>🎬 新建视频项目</h2>
+      <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+        <h2>新建视频项目</h2>
         <div className="modal-field">
           <label>SRT 字幕文件路径</label>
           <input
@@ -259,11 +252,11 @@ function InitModal({ onClose, onInitiated }) {
             onKeyDown={(e) => e.key === "Enter" && !loading && start()}
           />
         </div>
-        {error && <div style={{color: "var(--error)", fontSize: "13px", marginBottom: "8px"}}>{error}</div>}
+        {error && <div className="modal-error">{error}</div>}
         <div className="modal-actions">
           <button className="btn" onClick={onClose}>取消</button>
           <button className="btn btn-primary" onClick={start} disabled={loading}>
-            {loading ? "初始化中..." : "开始"}
+            {loading ? "初始化中…" : "开始"}
           </button>
         </div>
       </div>
@@ -271,7 +264,7 @@ function InitModal({ onClose, onInitiated }) {
   );
 }
 
-// ── Main App ────────────────────────────────────────────
+// ── 主应用 ───────────────────────────────────────────────
 function App() {
   const [projects, setProjects] = useState([]);
   const [currentProject, setCurrentProject] = useState(null);
@@ -282,9 +275,8 @@ function App() {
   const [showInit, setShowInit] = useState(false);
   const [srtDir, setSrtDir] = useState("");
   const [busy, setBusy] = useState(false);
-  const eventSourceRef = useRef(null);
+  const [toast, setToast] = useState(null);
 
-  // 加载项目列表
   const refreshProjects = useCallback(async () => {
     if (!srtDir) return;
     try {
@@ -295,28 +287,25 @@ function App() {
     }
   }, [srtDir]);
 
-  // 选择项目时加载状态
   useEffect(() => {
     if (!currentProject) return;
+    let cancelled = false;
     api(`/api/pipeline/${encodeURIComponent(currentProject)}`)
-      .then(setPipelineState)
-      .catch(() => setPipelineState(null));
+      .then((s) => { if (!cancelled) setPipelineState(s); })
+      .catch(() => { if (!cancelled) setPipelineState(null); });
     setLogs([]);
     setRenderProgress(0);
+    return () => { cancelled = true; };
   }, [currentProject]);
 
-  // SSE 事件订阅
   useEffect(() => {
     if (!currentProject) return;
     const encoded = encodeURIComponent(currentProject);
     const es = new EventSource(`/api/events?projectRoot=${encoded}`);
-    eventSourceRef.current = es;
 
     es.addEventListener("state", (e) => {
       const data = JSON.parse(e.data);
-      if (data.projectRoot === currentProject) {
-        setPipelineState(data.state);
-      }
+      if (data.projectRoot === currentProject) setPipelineState(data.state);
     });
 
     es.addEventListener("log", (e) => {
@@ -328,12 +317,9 @@ function App() {
 
     es.addEventListener("render-progress", (e) => {
       const data = JSON.parse(e.data);
-      if (data.projectRoot === currentProject) {
-        setRenderProgress(data.progress);
-      }
+      if (data.projectRoot === currentProject) setRenderProgress(data.progress);
     });
 
-    // SSE 断线兜底
     es.addEventListener("error", () => {
       if (es.readyState === EventSource.CLOSED) {
         setLogs((prev) => [...prev, {
@@ -347,8 +333,6 @@ function App() {
     return () => es.close();
   }, [currentProject]);
 
-  // ── Actions ─────────────────────────────────
-  const [toast, setToast] = useState(null);
   const showToast = (msg, level = "error") => {
     setToast({ message: msg, level, ts: Date.now() });
     setTimeout(() => setToast(null), 5000);
@@ -368,15 +352,16 @@ function App() {
   };
 
   const steps = pipelineState?.steps || {};
+  const tts = pipelineState?.tts || {};
   const video = pipelineState?.video || {};
   const hasVideo = video.path !== null;
 
   return (
     <div className="app">
-      {/* Header */}
       <div className="header">
         <div className="header-left">
           <h1>Remotion Video 控制台</h1>
+          <div className="subtitle">SRT 字幕驱动的视频生成工作流</div>
         </div>
         <div className="header-right">
           <input
@@ -384,15 +369,15 @@ function App() {
             placeholder="SRT 目录路径"
             value={srtDir}
             onChange={(e) => setSrtDir(e.target.value)}
-            style={{width: "200px"}}
+            style={{ width: "200px" }}
           />
           <button className="btn" onClick={refreshProjects}>刷新</button>
           <select
             value={currentProject || ""}
             onChange={(e) => setCurrentProject(e.target.value)}
-            style={{width: "180px"}}
+            style={{ width: "180px" }}
           >
-            <option value="">选择项目...</option>
+            <option value="">选择项目…</option>
             {projects.map((p) => (
               <option key={p.projectRoot} value={p.projectRoot}>
                 {p.name} {p.hasVideo ? "✓" : ""}
@@ -404,115 +389,93 @@ function App() {
         </div>
       </div>
 
-      {/* Main */}
       <div className="main">
-        {/* Sidebar - Pipeline Steps */}
         <div className="sidebar">
-          <div className="section-title">Pipeline</div>
+          <div className="section-title">工作流</div>
 
-          <PipelineStep
-            title="1. 初始化"
+          <PipelineStep index={1} title="初始化"
             detail={steps.init?.result?.projectRoot ? "项目已创建" : "等待 SRT 文件"}
-            step={steps.init}
-          />
+            step={steps.init} />
 
-          <PipelineStep
-            title="2. 分镜生成"
-            detail={steps.storyboard?.result?.sceneCount ? `${steps.storyboard.result.sceneCount} 个场景` : "需要 Agent 执行（AI 语义分组）"}
-            step={steps.storyboard}
-          />
+          <PipelineStep index={2} title="分镜生成"
+            detail={steps.storyboard?.result?.sceneCount
+              ? `${steps.storyboard.result.sceneCount} 个场景`
+              : "需要 Agent 执行（AI 语义分组）"}
+            step={steps.storyboard} />
 
-          <PipelineStep
-            title="3. 场景组件"
-            detail={steps.creators?.total ? `${steps.creators.total} 个 Creator 并行` : "需要 Agent 执行（AI 生成组件）"}
-            step={steps.creators}
-          >
+          <PipelineStep index={3} title="场景组件"
+            detail={steps.creators?.total
+              ? `${steps.creators.total} 个 Creator 并行`
+              : "需要 Agent 执行（AI 生成组件）"}
+            step={steps.creators}>
+            {steps.creators?.creators?.length > 0 && (
+              <div className="creator-list">
+                {steps.creators.creators.map((c) => (
+                  <CreatorCard key={c.id} creator={c} />
+                ))}
+              </div>
+            )}
           </PipelineStep>
 
-          {/* Creator cards */}
-          {steps.creators?.creators?.map((c) => (
-            <CreatorCard key={c.id} creator={c} />
-          ))}
-
-          <PipelineStep
-            title="4. 场景注册"
-            detail={steps.registry?.result?.sceneCount ? `${steps.registry.result.sceneCount} 个场景已注册` : "生成 generated-scenes.ts"}
+          <PipelineStep index={4} title="场景注册"
+            detail={steps.registry?.result?.sceneCount
+              ? `${steps.registry.result.sceneCount} 个场景已注册`
+              : "生成 generated-scenes.ts"}
             step={steps.registry}
             onAction={() => runAction("/api/run/registry", {}, "场景注册")}
-            actionLabel="注册"
-            disabled={!currentProject || busy}
-          />
+            actionLabel="注册" disabled={!currentProject || busy} />
 
-          <PipelineStep
-            title="5. 校验"
+          <PipelineStep index={5} title="校验"
             detail={steps.validate?.status === "done" ? "通过" : "渲染前检查"}
             step={steps.validate}
             onAction={() => runAction("/api/run/validate", {}, "校验")}
-            actionLabel="校验"
-            disabled={!currentProject || busy}
-          />
+            actionLabel="校验" disabled={!currentProject || busy} />
 
-          <PipelineStep
-            title="6. TTS 语音"
-            detail={
-              pipelineState?.tts?.status === "done"
-                ? `${pipelineState.tts.provider}: ${pipelineState.tts.segments.done} 段`
-                : pipelineState?.tts?.status === "idle"
-                ? "可选：为视频添加配音"
-                : "等待执行"
-            }
-            step={pipelineState?.tts ? { status: pipelineState.tts.status } : { status: "pending" }}
-            onAction={() => runAction("/api/run/tts", {}, "TTS")}
-            actionLabel="生成语音"
-            disabled={!currentProject || busy}
-          />
+          <PipelineStep index={6} title="语音合成"
+            detail={tts.status === "done"
+              ? `${tts.provider} · ${tts.segments.done} 段`
+              : "可选：为视频添加配音"}
+            step={{ status: tts.status === "idle" ? "pending" : tts.status }}
+            onAction={() => runAction("/api/run/tts", {}, "语音合成")}
+            actionLabel="生成语音" disabled={!currentProject || busy} />
 
-          <PipelineStep
-            title="7. 渲染"
-            detail={
-              steps.render?.status === "done"
-                ? `${video.sizeMB} MB`
-                : steps.render?.status === "running"
-                ? `渲染中 ${Math.round(renderProgress * 100)}%`
-                : "输出 MP4"
-            }
+          <PipelineStep index={7} title="渲染输出"
+            detail={steps.render?.status === "done"
+              ? `${video.sizeMB} MB`
+              : steps.render?.status === "running"
+              ? `渲染中 ${Math.round(renderProgress * 100)}%`
+              : "输出 MP4"}
             step={steps.render}
             onAction={() => runAction("/api/run/render", {}, "渲染")}
-            actionLabel="渲染"
-            disabled={!currentProject || busy}
-          />
+            actionLabel="渲染" disabled={!currentProject || busy} />
 
-          {/* Render progress bar */}
           {steps.render?.status === "running" && (
             <div className="progress-bar">
-              <div className="progress-fill" style={{width: `${renderProgress * 100}%`}} />
+              <div className="progress-fill" style={{ width: `${renderProgress * 100}%` }} />
             </div>
           )}
         </div>
 
-        {/* Content - Video Preview */}
         <div className="content">
           <div className="preview-area">
             <div className="video-container">
               {hasVideo ? (
                 <>
-                  <video
-                    controls
-                    src={`/api/video/${encodeURIComponent(currentProject)}`}
-                  />
-                  <div style={{marginTop: "12px"}}>
-                    <a
-                      className="btn btn-primary"
+                  <video controls
+                    src={`/api/video/${encodeURIComponent(currentProject)}`} />
+                  <div style={{ marginTop: "16px" }}>
+                    <a className="btn btn-primary"
                       href={`/api/video/${encodeURIComponent(currentProject)}`}
-                      download="output.mp4"
-                    >
-                      下载 MP4 ({video.sizeMB} MB)
+                      download="output.mp4">
+                      下载 MP4（{video.sizeMB} MB）
                     </a>
                   </div>
                 </>
               ) : (
                 <div className="preview-placeholder">
-                  {currentProject ? "视频尚未渲染，完成 Pipeline 步骤后点击「渲染」" : "选择或新建一个项目开始"}
+                  {currentProject
+                    ? "完成工作流步骤后，视频将在此处呈现"
+                    : <><strong>选择或新建</strong>一个项目开始</>}
                 </div>
               )}
             </div>
@@ -522,22 +485,15 @@ function App() {
         </div>
       </div>
 
-      {/* Toast */}
       {toast && (
-        <div className={`toast ${toast.level}`}>
-          {toast.message}
-        </div>
+        <div className={`toast ${toast.level}`}>{toast.message}</div>
       )}
 
-      {/* Modals */}
       {showConfig && <ConfigModal onClose={() => setShowConfig(false)} onSave={() => {}} />}
       {showInit && (
         <InitModal
           onClose={() => setShowInit(false)}
-          onInitiated={(pr) => {
-            setCurrentProject(pr);
-            setShowInit(false);
-          }}
+          onInitiated={(pr) => { setCurrentProject(pr); setShowInit(false); }}
         />
       )}
     </div>
@@ -547,12 +503,10 @@ function App() {
 // ── Mount ───────────────────────────────────────────────
 function mountApp() {
   if (typeof ReactDOM === "undefined" || typeof React === "undefined") {
-    // React CDN 还没加载完，等一下重试
-    document.getElementById("root").innerHTML = '<div style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;color:#8b8fa3;font-family:system-ui;">正在加载 React，请稍候...</div>';
+    document.getElementById("root").innerHTML = '<div style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;color:#999;font-family:Georgia,serif;">正在加载 React…</div>';
     setTimeout(mountApp, 200);
     return;
   }
-  const { createRoot } = ReactDOM;
-  createRoot(document.getElementById("root")).render(<App />);
+  ReactDOM.createRoot(document.getElementById("root")).render(<App />);
 }
 mountApp();
