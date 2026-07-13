@@ -1,53 +1,90 @@
-# ── Node.js 依赖（运行时自动安装）────────────────────────
+# ═══════════════════════════════════════════════════════════
+# .gitignore — Remotion Video 项目服务
+# 原则：敏感信息不泄露、开发配置不上传、运行时产物不提交
+# ═══════════════════════════════════════════════════════════
+
+# ── Node.js ──────────────────────────────────────────────
 node_modules/
 
-# ── 构建产物（tsup 输出）─────────────────────────────────
+# ── 构建产物（tsup / esbuild 输出）──────────────────────
 dist/
+web-ui/public/app.js
+web-ui/public/app.js.map
+tsconfig.tsbuildinfo
 
-# ── SQLite 数据（运行时生成）────────────────────────────
+# ── SQLite 数据库（运行时生成）──────────────────────────
 .data/
+*.db
+*.db-shm
+*.db-wal
 
-# ── 敏感信息 / API 密钥（绝不入库）─────────────────────
+# ── 敏感信息 / API 密钥（绝不入库）──────────────────────
 .env
 .env.*
 !.env.example
 *.secret
 *_api_key*
 *_token*
+*_apikey*
 credentials.json
 secrets.json
+*.pem
+*.key
+*.pfx
+*.keystore
+# API / 访问令牌
+*.netrc
 
-# ── 生成产物（视频、项目输出等运行时文件）──────────────
+# ── 生成产物（视频/音频/项目输出）──────────────────────
 out/
 *.mp4
 *.webm
 *.mov
+*.mkv
 
-# 工作流运行时生成的项目产物
+# 工作流运行时生成的项目
 remotion-video-projects/
 scene-plans/
-public/audio.mp3
 
-# TTS 运行时产物（分段语音 + 合并音轨 + 清单）
+# TTS 运行时产物
 speech/
 speech-manifest.json
+public/audio.mp3
+*.wav
 *.mp3
 !template/**/*.mp3
+!examples/**/*.wav
 
-# ── 开发软件配置目录 / IDE ─────────────────────────────
+# ── 开发软件配置目录（不上传）──────────────────────────
 .vscode/
 .idea/
+.cursor/
 *.swp
 *.swo
 *~
+.project
+.settings/
+.eslintcache
 
-# ── 操作系统产生的文件 ─────────────────────────────────
+# ── Python ───────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+env/
+.Python
+pip-log.txt
+
+# ── 操作系统 ─────────────────────────────────────────────
 .DS_Store
 Thumbs.db
 Desktop.ini
+$RECYCLE.BIN/
+ehthumbs.db
 
-# ── 日志 / 临时文件 ────────────────────────────────────
+# ── 日志 / 临时文件 ──────────────────────────────────────
 *.log
 .tmp/
 tmp/
-__pycache__/

@@ -1,237 +1,210 @@
 # Remotion Video — Agent 驱动的视频生成项目服务
 
-> 从 SRT 字幕到完整 Remotion 视频的端到端工作流，支持 MCP 驱动、多 Provider TTS、实时控制台监控。
+> 从 SRT 字幕到完整 Remotion 视频的端到端工作流。支持 MCP 驱动、多 Provider TTS 语音合成、异步任务队列、实时 Web 控制台。
+
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue)]()
+[![MCP](https://img.shields.io/badge/MCP-17%20tools-green)]()
+[![SQLite](https://img.shields.io/badge/SQLite-WAL-orange)]()
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow)]()
+
+---
 
 ## 架构
 
-```text
-用户 → ZCode/Codex/Claude Code → Skill → MCP Server (17 工具)
-                                              ↓
-                                    Domain Service (Express + SSE)
-                                              ↓
-                                Core (SQLite + Provider + Artifact + Run 队列)
-                                              ↓
-                              scripts/*.js + tts/*.py + Remotion CLI
-                                              ↓
-                                        Artifact Store + 前端控制台
+```
+用户 → ZCode / Codex / Claude Code → Skill (SKILL.md)
+                                         ↓
+                                   MCP Server (17 工具, stdio)
+                                         ↓
+                                  Domain Service (Express + SSE)
+                                         ↓
+                             Core (SQLite + Provider + Artifact + Run 队列)
+                                         ↓
+                           scripts/*.js + tts/*.py + Remotion CLI
+                                         ↓
+                                    Web 控制台 (React SPA)
 ```
 
-**四层分离**（参考 VibeCanvas 架构）：
-- **Skill**：触发、决策、MCP 调用顺序
-- **MCP Server**：17 个工具，Agent 通过 MCP 协议调用业务服务
-- **Domain Service**：Express API + SSE + 异步 Run 队列 + Worker
-- **Provider**：封装 scripts/*.js / tts/*.py / Remotion CLI
+**四层分离**：
+
+| 层 | 目录 | 职责 |
+|---|---|---|
+| **Skill** | `SKILL.md` + `references/` | 触发条件、工作流编排、质量标准 |
+| **MCP Server** | `server/mcp/` | 17 个 MCP 工具，Agent 通过 stdio 调用 |
+| **Domain Service** | `server/api/` + `server/core/` | Express API + SSE + SQLite + 异步队列 + Worker |
+| **Provider** | `server/core/providers/` | 封装 scripts/*.js / tts/*.py / Remotion CLI |
 
 ## 快速开始
 
-```bash
-# 安装依赖
-npm install && cd web-ui && npm install
+### 安装
 
+```bash
+git clone https://github.com/techdou/remotion-video.git
+cd remotion-video
+
+# 安装后端依赖
+npm install
+
+# 安装前端依赖
+cd web-ui && npm install && cd ..
+
+# 安装模板依赖（首次）
+cd template && npm install && cd ..
+```
+
+### 构建
+
+```bash
 # 构建后端（TypeScript → dist/）
 npm run build
 
 # 构建前端（JSX → app.js）
-cd web-ui && npx esbuild public/app.jsx --bundle --format=iife --jsx=transform --outfile=public/app.js && cd ..
+npx esbuild web-ui/public/app.jsx --bundle --format=iife --jsx=transform \
+  --outfile=web-ui/public/app.js
+```
 
-# 启动 Domain Service（API + Worker + 前端）
+### 启动
+
+```bash
+# 启动 Domain Service（API + Worker + Web 控制台）
 node dist/index.js
 # → http://127.0.0.1:3210
 
-# 启动 MCP Server（另一个终端，Agent 用）
+# 启动 MCP Server（另一个终端，供 Agent 调用）
 node dist/mcp.js
 ```
 
-## 工作原理
+## 核心能力
 
-```text
-SRT 字幕 → 语义分镜 → 并行 Scene Creator 生成 React 场景组件 → Remotion 渲染 → MP4
-```
+### MCP Server（17 个工具）
 
-- 视频技术栈：**Remotion**（React 代码驱动渲染）
-- 设计分辨率：1920×1080 / 30fps（可通过 `--scale 2` 输出 4K）
-- 场景风格：卡通 UI、数据可视化、文字动画
-- 场景组件由 SubAgent 并行生成（每 5 个场景一个 Creator）
+Agent 通过 MCP 协议调用以下工具，所有长任务异步执行（立即返回 `runId`）：
 
-## 安装
+| 工具 | 用途 |
+|---|---|
+| `get_project_context` | 获取项目完整上下文（project + runs + artifacts） |
+| `get_capabilities` | 列出 Provider 能力和支持的 run 类型 |
+| `start_run` | 提交异步任务（init/render/tts/validate 等） |
+| `get_run_status` | 查询任务状态和进度 |
+| `cancel_run` | 取消运行中的任务 |
+| `list_artifacts` | 列出项目产物 |
+| `set_artifact_status` | 设置产物状态（draft→candidate→selected→final） |
+| `test_provider` | 测试 Provider 连通性 |
+| ... | 完整 17 个工具见 `server/mcp/index.ts` |
 
-将整个 `remotion-video/` 目录放到 Agent 的 skills 目录下：
+### 异步 Run 队列
 
-```text
-.agents/skills/remotion-video/
-```
+- **SQLite-backed**：任务持久化，进程崩溃不丢失
+- **Worker Lease + Heartbeat**：防止任务被重复执行
+- **崩溃恢复**：启动时扫描超时 run，自动标记 failed 或重新排队
+- **AbortSignal**：取消信号贯穿 Provider → 子进程 → 下载 → 重试
 
-**无需额外配置**。首次使用时脚本会自动在 `template/` 下安装 Node.js 依赖。
+### Provider 系统
 
-要求：
-- Node.js 18+
-- npm
+三种 Provider 封装现有脚本，通过子进程 spawn 调用（不修改原脚本）：
 
-## 快速开始
-
-### 1. 从 SRT 生成视频
-
-```bash
-# 步骤 1: 依赖预检 + 项目初始化
-node scripts/ensure-template-deps.js template/
-node scripts/init-project.js --srt-path /path/to/your.srt
-
-# 步骤 2-3: SubAgent 生成分镜和场景组件（详见 SKILL.md）
-
-# 步骤 4: 合成视频
-node scripts/generate-scenes-registry.js {projectRoot} {projectRoot}/storyboard.json
-node scripts/validate-project.js {projectRoot} {projectRoot}/storyboard.json
-cd {projectRoot}
-npx remotion render Main out/output.mp4
-```
-
-### 2. 调试模式（加音频预览）
-
-```bash
-cp /path/to/audio.mp3 {projectRoot}/public/audio.mp3
-cd {projectRoot}
-npx remotion studio
-```
-
-### 3. 4K / 60fps 高分辨率输出
-
-```bash
-# 4K（保持设计分辨率不变，通过 scale 放大）
-npx remotion render Main out/output-4k.mp4 --scale 2
-
-# 60fps（需同步修改 Root.tsx fps 和 generated-scenes.ts totalDurationInFrames）
-```
-
-### 4. AI 语音播报（TTS 配音）
-
-按 SRT 字幕自动生成语音并合并为完整音轨，添加到视频中。支持三种 provider：
-
-```bash
-# 步骤 1: 按 SRT 每段字幕生成语音
-python3 tts/generate-speech.py subtitle.srt ./speech/
-
-# 步骤 2: 按 SRT 时间轴合并为一条完整音轨
-python3 tts/merge-speech.py ./speech/ {projectRoot}/public/audio.mp3
-
-# 步骤 3: 添加到视频（参考调试模式 TM.1）
-# 然后渲染或预览
-```
-
-**Provider 配置**（`.env`）：
-
-| Provider | 配置 | 适用场景 |
+| Provider | 包装对象 | 操作 |
 |---|---|---|
-| `openai`（默认） | `TTS_API_KEY` + `TTS_BASE_URL` | OpenAI / 硅基流动 / 火山方舟 / OneAPI 等所有 OpenAI `/v1/audio/speech` 兼容平台 |
-| `mimo` | `MIMO_API_KEY` | 小米 MiMo TTS，预置音色 / 音色设计 / 音色克隆 |
-| `edge` | `pip install edge-tts` | 免费本地，无需 API Key，支持数百种 Neural 语音 |
+| `script` | `scripts/*.js` (CommonJS) | init / storyboard / creators / registry / validate |
+| `tts` | `tts/*.py` (Python) | tts（语音合成）/ merge_speech（合并音轨） |
+| `render` | `npx remotion render` | render（视频渲染） |
 
-详见 [`.env.example`](.env.example)。
+### TTS 语音合成（3 个 Provider）
 
-**时间轴策略**：SRT 驱动。每段语音放在其 SRT 时间点播放，动画和字幕严格对齐。
+| Provider | 平台 | 配置 |
+|---|---|---|
+| `openai` (默认) | OpenAI / 硅基流动 / 火山方舟 / OneAPI | `TTS_API_KEY` + `TTS_BASE_URL` |
+| `mimo` | 小米 MiMo | `MIMO_API_KEY`（Chat Completions 格式） |
+| `edge` | Edge TTS | 免费本地，无需 API Key |
 
-### 5. Web 控制台（可选）
+配置见 `.env.example`。时间轴策略：SRT 驱动，每段语音放在原始时间点。
 
-浏览器操作界面——pipeline 进度可视化、配置管理、视频预览/下载：
+### Artifact 系统
 
-```bash
-cd web-ui
-npm install   # 首次安装
-node server.js
-# → http://localhost:3210
-```
+每个产物记录：ID、类型、状态（draft→candidate→selected→final→archived）、来源 Run、父 Artifact（版本树）。
 
-**功能**：
-- Pipeline 步骤可视化（初始化→分镜→场景组件→注册→校验→渲染）
-- 并行 SubAgent 状态卡片（每个 Creator 独立状态）
-- 渲染实时进度条（SSE 推送）
-- TTS 触发（一键生成语音并合并）
-- 配置管理（Provider 选择、API Key 编辑，保存到 .env）
-- MP4 视频预览和下载
-- 实时日志流
+### Web 控制台
 
-**两种使用模式**：
-- **Agent 驱动**：Agent 通过 CLI 执行，Web 界面读 `pipeline-state.json` 做只读监控
-- **Web 驱动**：用户在界面点击按钮触发场景注册/校验/TTS/渲染（分镜生成和场景组件创建仍需 Agent）
+多页面 SPA，学者暖色系设计（亚麻 #F5F3EE + 陶杯 #C0785A + 衬线字体）：
+
+- **控制台**：项目统计、活跃任务、最近项目
+- **项目**：项目列表 + 新建
+- **项目工作区**：Pipeline 步骤 / 产物版本 / 任务记录（三标签页）
+- **Provider**：能力列表 + 连通性测试
+- **设置**：TTS 配置管理
 
 ## 目录结构
 
-```text
+```
 remotion-video/
-├── SKILL.md                      # Agent 技能定义（完整工作流编排）
-├── README.md                     # 本文档
-├── .gitignore
-├── rules/                        # Remotion 最佳实践规则库（40+ 规则）
-│   ├── animations.md             # 动画基础
-│   ├── text-animations.md        # 文字动画
-│   ├── timing.md                 # 插值与缓动
-│   ├── transitions.md            # 场景转场
-│   ├── subtitles.md              # 字幕
-│   ├── audio.md                  # 音频处理
-│   ├── charts.md                 # 数据可视化
-│   ├── compositions.md           # Composition 配置
-│   ├── assets/                   # 示例代码片段（.tsx）
-│   └── ...                       # 更多规则（3D、GIF、Lottie、地图等）
-├── references/                   # SubAgent 阶段协议
-│   ├── storyboard-parser.md      # 分镜生成阶段协议
-│   ├── scene-component-creator.md # 场景规划与实现阶段协议
-│   └── theme-template-switching.md # 主题模板更换指南
-├── scripts/                      # 工作流脚本
-│   ├── ensure-template-deps.js   # 依赖预检
-│   ├── init-project.js           # 项目初始化
-│   ├── generate-storyboard.js    # 分镜生成
-│   ├── generate-creator-scenes.js # Creator 场景数据
-│   ├── generate-scenes-registry.js # 场景注册文件生成
-│   ├── validate-project.js       # 渲染前校验
-│   ├── validate-scene-plan.js    # scene-plan 校验
-│   └── scene-registry-utils.js   # 工具函数
-├── tts/                          # 语音合成（可选）
-│   ├── generate-speech.py        # 按 SRT 分段生成语音
-│   ├── merge-speech.py           # 合并分段为完整音轨（需 ffmpeg）
-│   └── providers/                # TTS provider 适配层
-│       ├── openai_provider.py    # OpenAI 兼容（官方/硅基/火山/OneAPI）
-│       ├── mimo_provider.py      # MiMo TTS（小米，Chat Completions 格式）
-│       └── edge_provider.py      # Edge TTS（免费本地，需 pip install edge-tts）
-├── web-ui/                      # Web 控制台（可选）
-│   ├── server.js                # Express 后端（API + SSE）
-│   ├── public/                  # 前端静态文件（React SPA）
-│   └── lib/                     # 脚本执行器/状态管理/渲染包装
-└── template/                     # Remotion 项目模板
-    ├── package.json
-    ├── src/
-    │   ├── Root.tsx              # Composition 根
-    │   ├── index.ts              # 入口
-    │   ├── design-system.ts      # 设计系统
-    │   ├── video-config.ts       # 视频配置
-    │   └── compositions/
-    │       ├── Main.tsx          # 主合成
-    │       └── generated-scenes.ts # 场景注册（脚本生成）
-    ├── cartoon-ui-style-guide.css # 卡通 UI 样式
-    └── tsconfig.json
+├── server/                      # TS 业务内核
+│   ├── core/
+│   │   ├── types.ts             # 接口定义
+│   │   ├── db.ts                # SQLite + WAL + migration
+│   │   ├── storage.ts           # CRUD + revision 乐观锁
+│   │   ├── run-queue.ts         # 异步队列 + Worker + 崩溃恢复
+│   │   ├── artifact-store.ts    # 产物文件存储 + 版本管理
+│   │   ├── config.ts            # .env 读取 + 脱敏 + 路径防护
+│   │   ├── providers/           # Provider 系统
+│   │   │   ├── base.ts          # 接口
+│   │   │   ├── script-provider.ts
+│   │   │   ├── tts-provider.ts
+│   │   │   ├── render-provider.ts
+│   │   │   └── registry.ts
+│   │   ├── migrations/          # SQL 迁移
+│   │   └── tests/               # 34 个测试
+│   ├── mcp/index.ts             # MCP Server (17 工具)
+│   ├── api/index.ts             # Express API + SSE
+│   └── index.ts                 # 主入口
+├── web-ui/                      # React 控制台
+│   ├── public/
+│   │   ├── app.jsx              # 源码（需编译）
+│   │   ├── styles.css
+│   │   └── vendor/              # React 18 本地化
+│   └── ...
+├── scripts/                     # 工作流脚本 (CommonJS)
+├── tts/                         # TTS Python 子系统
+│   ├── generate-speech.py
+│   ├── merge-speech.py
+│   └── providers/               # openai / mimo / edge
+├── template/                    # Remotion 项目模板
+├── rules/                       # 40+ Remotion 最佳实践规则
+├── references/                  # 工作流协议文档
+├── SKILL.md                     # Agent 技能定义
+├── .env.example                 # TTS 配置模板
+├── tsconfig.json
+└── tsup.config.ts
 ```
 
-## 工作流详解
+## 测试
 
-完整工作流分 5 步（详见 [SKILL.md](SKILL.md)）：
+```bash
+# 运行全部 34 个测试
+npx tsx --test server/core/tests/storage.test.ts server/core/tests/advanced.test.ts
+```
 
-| 步骤 | 说明 | 执行者 |
-|------|------|--------|
-| 0 | 获取 SRT 文件路径 | 主 Agent |
-| 1 | 依赖预检 + 项目初始化 | 主 Agent |
-| 2 | SRT → 分镜脚本 (storyboard.json) | SubAgent |
-| 3 | 分镜 → 场景组件 (SceneXXX.tsx) | 并行 SubAgent |
-| 4 | 合成视频 (generate-registry → validate → render) | 主 Agent |
+覆盖：Project CRUD、Run 生命周期、Artifact 版本树、revision 乐观锁并发、Worker lease/heartbeat、崩溃恢复、Provider 能力探测和错误处理。
 
-### 场景组件约定
+## 安全
 
-- 接口固定为 `React.FC<{ segments: Segment[] }>`，默认导出
-- 节奏绑定 `segments[].relativeStart / relativeDuration`
-- 开发时按需读取 `rules/` 下的 Remotion 规则
-- 受保护文件：`Main.tsx`、`Root.tsx`、`generated-scenes.ts`（不手改）
+- **绑定 127.0.0.1**：Domain Service 不暴露局域网
+- **路径穿越防护**：`validateProjectPath` 精确匹配项目目录
+- **API Key 脱敏**：GET 返回 `sk-abc***`，PUT 跳过脱敏值
+- **CORS 限制**：仅允许 localhost
+- **配置合并写入**：保留 .env 注释，key 格式校验，拒绝换行注入
 
-## 合并说明
+## 依赖
 
-本 skill 合并了原先独立的两个 skill：
-- `srt-remotion-video`（SRT → Remotion 视频工作流编排）
-- `remotion-best-practices`（Remotion 最佳实践规则库，现为 `rules/` 目录）
+| 依赖 | 用途 |
+|---|---|
+| Node.js 18+ | 运行环境 |
+| Python 3.9+ | TTS 子系统 |
+| ffmpeg | 语音合并 |
+| `better-sqlite3` | SQLite 驱动 |
+| `@modelcontextprotocol/sdk` | MCP Server |
+| `express` | HTTP API |
+| `edge-tts` (可选) | 免费 TTS |
 
-合并后规则库内置于同一 skill，消除了跨 skill 的兄弟目录硬编码依赖。
+## License
+
+MIT © 2025 [techdou](https://github.com/techdou)
