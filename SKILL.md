@@ -163,16 +163,35 @@ Python scripts for AI text-to-speech. Requires Python 3.9+. See `.env.example` f
 
 Lightweight Remotion project template, distributed with the skill. First use triggers `npm install` in the template directory.
 
-### web-ui/ (optional control panel)
+### server/ (Agent-driven project service)
 
-Web-based control panel for monitoring pipeline progress, configuring providers, and previewing/downloading rendered videos.
+Full backend service: SQLite + Run Queue + Provider system + MCP Server + REST API. Enables Agent-driven workflow via MCP tools.
 
 ```bash
-cd web-ui && npm install && node server.js
-# → http://localhost:3210
+# Install + build (first time)
+npm install && npm run build && cd web-ui && npm install && npm run build
+
+# Start Domain Service (API + Worker + Web UI)
+node dist/index.js
+# → http://127.0.0.1:3210 (API + frontend)
+
+# Start MCP Server (separate process, for Agent)
+node dist/mcp.js
+# → stdio transport, 17 MCP tools
 ```
 
-Features: pipeline step visualization, parallel SubAgent status, render progress (SSE), TTS trigger, config management (.env editor), MP4 preview/download. Reads `pipeline-state.json` for Agent-driven mode, or triggers steps directly for Web-driven mode.
+Architecture: `core/ (SQLite + Provider + Artifact + Run Queue) → mcp/ (17 tools) → api/ (Express + SSE)`
+
+MCP tools: `get_project_context`, `start_run`, `get_run_status`, `cancel_run`, `list_artifacts`, `test_provider`, etc. See `server/mcp/index.ts` for full list.
+
+### web-ui/ (control panel)
+
+Multi-page SPA with Dashboard, Projects, Project Workspace (pipeline/artifacts/runs tabs), Providers, Settings. Warm scholar aesthetic. Served by Domain Service at `/`.
+
+```bash
+# Rebuild frontend after editing app.jsx
+cd web-ui && npx esbuild public/app.jsx --bundle --format=iife --jsx=transform --outfile=public/app.js
+```
 
 ## Constraints
 

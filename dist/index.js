@@ -1158,6 +1158,8 @@ function getRunQueue() {
 // server/api/index.ts
 init_storage();
 import express from "express";
+import { existsSync as existsSync7 } from "fs";
+import { join as join7 } from "path";
 init_registry();
 init_config();
 init_artifact_store();
@@ -1179,6 +1181,8 @@ var PORT = parseInt(process.env.WEB_UI_PORT || "3210", 10);
 function createApiServer() {
   const app = express();
   app.use(express.json());
+  const webUiDir = join7(process.cwd(), "web-ui", "public");
+  app.use(express.static(webUiDir));
   app.use((req, res, next) => {
     const origin = req.headers.origin;
     if (origin && /^https?:\/\/localhost(:\d+)?$/.test(origin)) {
@@ -1335,6 +1339,14 @@ function createApiServer() {
       queue.off("run:cancelled", onCancelled);
       queue.off("run:failed", onFailed);
     });
+  });
+  app.get("*", (req, res) => {
+    const indexPath = join7(webUiDir, "index.html");
+    if (existsSync7(indexPath)) {
+      res.sendFile(indexPath);
+    } else {
+      res.status(404).json({ error: "Frontend not built" });
+    }
   });
   return app;
 }

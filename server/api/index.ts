@@ -28,6 +28,10 @@ export function createApiServer(): express.Express {
   const app = express();
   app.use(express.json());
 
+  // 静态文件服务（前端 SPA）
+  const webUiDir = join(process.cwd(), "web-ui", "public");
+  app.use(express.static(webUiDir));
+
   // CORS（仅 localhost）
   app.use((req, res, next) => {
     const origin = req.headers.origin;
@@ -214,6 +218,16 @@ export function createApiServer(): express.Express {
       queue.off("run:cancelled", onCancelled);
       queue.off("run:failed", onFailed);
     });
+  });
+
+  // SPA fallback：非 /api 路径返回 index.html
+  app.get("*", (req, res) => {
+    const indexPath = join(webUiDir, "index.html");
+    if (existsSync(indexPath)) {
+      res.sendFile(indexPath);
+    } else {
+      res.status(404).json({ error: "Frontend not built" });
+    }
   });
 
   return app;

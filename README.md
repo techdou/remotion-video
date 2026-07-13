@@ -1,6 +1,46 @@
-# Remotion Video — SRT 字幕驱动视频生成
+# Remotion Video — Agent 驱动的视频生成项目服务
 
-> 从 SRT 字幕文件一键生成 Remotion 视频。自动完成分镜解析、并行场景组件生成、视频渲染。
+> 从 SRT 字幕到完整 Remotion 视频的端到端工作流，支持 MCP 驱动、多 Provider TTS、实时控制台监控。
+
+## 架构
+
+```text
+用户 → ZCode/Codex/Claude Code → Skill → MCP Server (17 工具)
+                                              ↓
+                                    Domain Service (Express + SSE)
+                                              ↓
+                                Core (SQLite + Provider + Artifact + Run 队列)
+                                              ↓
+                              scripts/*.js + tts/*.py + Remotion CLI
+                                              ↓
+                                        Artifact Store + 前端控制台
+```
+
+**四层分离**（参考 VibeCanvas 架构）：
+- **Skill**：触发、决策、MCP 调用顺序
+- **MCP Server**：17 个工具，Agent 通过 MCP 协议调用业务服务
+- **Domain Service**：Express API + SSE + 异步 Run 队列 + Worker
+- **Provider**：封装 scripts/*.js / tts/*.py / Remotion CLI
+
+## 快速开始
+
+```bash
+# 安装依赖
+npm install && cd web-ui && npm install
+
+# 构建后端（TypeScript → dist/）
+npm run build
+
+# 构建前端（JSX → app.js）
+cd web-ui && npx esbuild public/app.jsx --bundle --format=iife --jsx=transform --outfile=public/app.js && cd ..
+
+# 启动 Domain Service（API + Worker + 前端）
+node dist/index.js
+# → http://127.0.0.1:3210
+
+# 启动 MCP Server（另一个终端，Agent 用）
+node dist/mcp.js
+```
 
 ## 工作原理
 

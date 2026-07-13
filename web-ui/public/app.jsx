@@ -1,6 +1,9 @@
 const { useState, useEffect, useRef, useCallback } = React;
 
-// ── API helper ──────────────────────────────────────────
+// ════════════════════════════════════════════════════════
+// API Helper
+// ════════════════════════════════════════════════════════
+
 async function api(path, options = {}) {
   const res = await fetch(path, {
     ...options,
@@ -11,7 +14,10 @@ async function api(path, options = {}) {
   return data;
 }
 
-// ── Hooks ───────────────────────────────────────────────
+// ════════════════════════════════════════════════════════
+// Hooks
+// ════════════════════════════════════════════════════════
+
 function useEscapeKey(onClose) {
   useEffect(() => {
     const onKey = (e) => { if (e.key === "Escape") onClose(); };
@@ -20,202 +26,555 @@ function useEscapeKey(onClose) {
   }, [onClose]);
 }
 
-// ── 步骤编号 ─────────────────────────────────────────────
-function StepNumber({ index, status }) {
-  const num = String(index).padStart(2, "0");
-  return <span className={`step-number ${status || ""}`}>{num}</span>;
+function useSSE(projectId, handlers) {
+  const esRef = useRef(null);
+  useEffect(() => {
+    if (!projectId) return;
+    const params = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
+    const es = new EventSource(`/api/events${params}`);
+    esRef.current = es;
+
+    const bind = (event, handler) => {
+      if (!handler) return;
+      es.addEventListener(event, (e) => {
+        try { handler(JSON.parse(e.data)); } catch {}
+      });
+    };
+
+    es.addEventListener("error", () => {
+      if (es.readyState === EventSource.CLOSED && handlers.onError) {
+        handlers.onError("实时连接已断开");
+      }
+    });
+
+    bind("run:queued", handlers.onRunQueued);
+    bind("run:started", handlers.onRunStarted);
+    bind("run:progress", handlers.onRunProgress);
+    bind("run:completed", handlers.onRunCompleted);
+    bind("run:failed", handlers.onRunFailed);
+    bind("run:cancelled", handlers.onRunCancelled);
+
+    return () => es.close();
+  }, [projectId]);
 }
 
-// ── Pipeline 步骤组件 ────────────────────────────────────
-function PipelineStep({ index, title, detail, step, onAction, actionLabel, disabled, children }) {
-  const status = step?.status || "pending";
+// ════════════════════════════════════════════════════════
+// Shared Components
+// ════════════════════════════════════════════════════════
+
+function StatusPill({ status }) {
+  const labels = {
+    queued: ["待处理", "pill-pending"],
+    running: ["进行中", "pill-running"],
+    completed: ["已完成", "pill-done"],
+    failed: ["失败", "pill-failed"],
+    cancelled: ["已取消", "pill-pending"],
+    draft: ["草稿", "pill-pending"],
+    candidate: ["候选", "pill-running"],
+    selected: ["已选", "pill-done"],
+    final: ["最终", "pill-done"],
+    archived: ["已归档", "pill-pending"],
+  };
+  const [label, cls] = labels[status] || [status, "pill-pending"];
+  return <span className={`pill ${cls}`}>{label}</span>;
+}
+
+function Toast({ toast, onClose }) {
+  useEffect(() => {
+    if (toast) { const t = setTimeout(onClose, 5000); return () => clearTimeout(t); }
+  }, [toast, onClose]);
+  if (!toast) return null;
+  return <div className={`toast ${toast.level}`}>{toast.message}</div>;
+}
+
+function StepNumber({ index, status }) {
+  return <span className={`step-number ${status || ""}`}>{String(index).padStart(2, "0")}</span>;
+}
+
+function Modal({ title, onClose, children }) {
+  useEscapeKey(onClose);
   return (
-    <div className="step">
-      <StepNumber index={index} status={status} />
-      <div className="step-content">
-        <div className="step-title">{title}</div>
-        {detail && <div className="step-detail">{detail}</div>}
-        {step?.error && <div className="step-error">{step.error.slice(0, 100)}</div>}
-        {onAction && (
-          <div className="step-actions">
-            <button
-              className="btn"
-              onClick={onAction}
-              disabled={disabled || status === "running"}
-            >
-              {status === "running" ? "执行中…" : actionLabel}
-            </button>
-          </div>
-        )}
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+        <h2>{title}</h2>
         {children}
       </div>
     </div>
   );
 }
 
-// ── Creator 子卡片 ───────────────────────────────────────
-function CreatorCard({ creator }) {
-  const status = creator.status || "pending";
-  const labels = { done: "✓", running: "·", failed: "×", pending: "○" };
+function ModalField({ label, children }) {
   return (
-    <div className={`creator-card ${status}`}>
-      {labels[status]} {creator.id} · {creator.sceneIds?.length || 0} 场景
+    <div className="modal-field">
+      <label>{label}</label>
+      {children}
     </div>
   );
 }
 
-// ── 日志面板 ─────────────────────────────────────────────
-function LogPanel({ logs }) {
-  const ref = useRef(null);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
-    if (nearBottom) el.scrollTop = el.scrollHeight;
-  }, [logs]);
+function ModalActions({ onClose, onSubmit, submitLabel, submitting }) {
   return (
-    <div className="log-area" ref={ref}>
-      {logs.length === 0 ? (
-        <div style={{ color: "var(--text-dim)", fontStyle: "italic" }}>
-          日志将在此处实时显示…
+    <div className="modal-actions">
+      <button className="btn" onClick={onClose}>取消</button>
+      <button className="btn btn-primary" onClick={onSubmit} disabled={submitting}>
+        {submitting ? "处理中…" : submitLabel || "确定"}
+      </button>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════
+// Pages
+// ════════════════════════════════════════════════════════
+
+// ── Dashboard ───────────────────────────────────────────
+
+function DashboardPage({ projects, runs, onNavigate, onNewProject }) {
+  const activeRuns = runs.filter((r) => r.status === "running" || r.status === "queued");
+  const completedVideos = runs.filter((r) => r.type === "render" && r.status === "completed");
+
+  return (
+    <div className="page">
+      <div className="page-header">
+        <h2 className="page-title">控制台</h2>
+        <button className="btn btn-primary" onClick={onNewProject}>新建项目</button>
+      </div>
+
+      <div className="stats-row">
+        <div className="stat-card">
+          <div className="stat-value">{projects.length}</div>
+          <div className="stat-label">项目</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-value">{activeRuns.length}</div>
+          <div className="stat-label">活跃任务</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-value">{completedVideos.length}</div>
+          <div className="stat-label">已渲染视频</div>
+        </div>
+      </div>
+
+      <div className="section-title">最近项目</div>
+      {projects.length === 0 ? (
+        <div className="empty-state">
+          还没有项目。<strong onClick={onNewProject}>创建第一个项目</strong>开始使用。
         </div>
       ) : (
-        logs.map((entry, i) => (
-          <div key={i} className={`log-line ${entry.level}`}>
-            <span className="log-time">{new Date(entry.timestamp).toLocaleTimeString()}</span>
-            {entry.message}
+        <div className="card-list">
+          {projects.slice(0, 5).map((p) => (
+            <div key={p.id} className="card" onClick={() => onNavigate("project", p.id)}>
+              <div className="card-title">{p.name}</div>
+              <div className="card-detail">{p.srtPath}</div>
+              <div className="card-meta">
+                <span className="pill pill-pending">v{p.revision}</span>
+                <span className="card-time">{new Date(p.createdAt).toLocaleString()}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {activeRuns.length > 0 && (
+        <>
+          <div className="section-title">活跃任务</div>
+          <div className="card-list">
+            {activeRuns.map((r) => {
+              const project = projects.find((p) => p.id === r.projectId);
+              return (
+                <div key={r.id} className="card" onClick={() => onNavigate("project", r.projectId)}>
+                  <div className="card-title">{project?.name || r.projectId}</div>
+                  <div className="card-detail">
+                    {r.type} · <StatusPill status={r.status} />
+                    {r.status === "running" && r.progress > 0 && ` ${Math.round(r.progress * 100)}%`}
+                  </div>
+                </div>
+              );
+            })}
           </div>
-        ))
+        </>
       )}
     </div>
   );
 }
 
-// ── 配置模态框 ───────────────────────────────────────────
-function ConfigModal({ onClose, onSave }) {
-  useEscapeKey(onClose);
-  const [config, setConfig] = useState({});
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [saving, setSaving] = useState(false);
+// ── Projects List ───────────────────────────────────────
 
-  const load = useCallback(() => {
-    setLoading(true);
-    setError(null);
-    api("/api/config")
-      .then((data) => { setConfig(data.config || {}); setLoading(false); })
-      .catch((err) => { setError(err.message); setLoading(false); });
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
-
-  const update = (key, value) => setConfig({ ...config, [key]: value });
-
-  const save = async () => {
-    setSaving(true);
-    setError(null);
-    try {
-      await api("/api/config", { method: "PUT", body: JSON.stringify({ config }) });
-      onSave();
-      onClose();
-    } catch (err) {
-      setError(err.message);
-    }
-    setSaving(false);
-  };
-
-  if (loading) return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>加载中…</div>
+function ProjectsPage({ projects, onNavigate, onNewProject }) {
+  return (
+    <div className="page">
+      <div className="page-header">
+        <h2 className="page-title">项目</h2>
+        <button className="btn btn-primary" onClick={onNewProject}>新建</button>
+      </div>
+      {projects.length === 0 ? (
+        <div className="empty-state">暂无项目</div>
+      ) : (
+        <div className="card-list">
+          {projects.map((p) => (
+            <div key={p.id} className="card" onClick={() => onNavigate("project", p.id)}>
+              <div className="card-title">{p.name}</div>
+              <div className="card-detail">{p.srtPath}</div>
+              <div className="card-meta">
+                <span className="pill pill-pending">v{p.revision}</span>
+                <span className="card-time">{new Date(p.createdAt).toLocaleString()}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
+}
 
-  const ttsProvider = config.TTS_PROVIDER || "openai";
+// ── Project Detail (Workspace) ──────────────────────────
+
+const RUN_STEPS = [
+  { type: "init", title: "初始化", desc: "创建项目结构" },
+  { type: "storyboard", title: "分镜生成", desc: "AI 语义分组生成 storyboard（Agent 执行）" },
+  { type: "creators", title: "场景组件", desc: "并行生成场景组件（Agent 执行）" },
+  { type: "registry", title: "场景注册", desc: "生成 generated-scenes.ts" },
+  { type: "validate", title: "校验", desc: "渲染前完整性检查" },
+  { type: "tts", title: "语音合成", desc: "可选：为视频添加配音" },
+  { type: "render", title: "渲染输出", desc: "输出 MP4" },
+];
+
+function ProjectPage({ projectId, onBack, showToast }) {
+  const [project, setProject] = useState(null);
+  const [runs, setRuns] = useState([]);
+  const [artifacts, setArtifacts] = useState([]);
+  const [tab, setTab] = useState("pipeline");
+  const [busy, setBusy] = useState(false);
+
+  const loadProject = useCallback(async () => {
+    try {
+      const data = await api(`/api/projects/${encodeURIComponent(projectId)}`);
+      setProject(data.project);
+      setRuns(data.runs || []);
+      setArtifacts(data.artifacts || []);
+    } catch (err) {
+      showToast(`加载失败: ${err.message}`);
+    }
+  }, [projectId, showToast]);
+
+  useEffect(() => { loadProject(); }, [loadProject]);
+
+  // SSE 实时更新
+  useSSE(projectId, {
+    onRunQueued: () => loadProject(),
+    onRunStarted: () => loadProject(),
+    onRunProgress: (data) => {
+      setRuns((prev) => prev.map((r) =>
+        r.id === data.runId ? { ...r, progress: data.data?.progress || r.progress } : r
+      ));
+    },
+    onRunCompleted: () => loadProject(),
+    onRunFailed: () => loadProject(),
+    onRunCancelled: () => loadProject(),
+    onError: (msg) => showToast(msg),
+  });
+
+  const startRun = async (type, input = {}) => {
+    setBusy(true);
+    try {
+      await api(`/api/projects/${encodeURIComponent(projectId)}/runs`, {
+        method: "POST",
+        body: JSON.stringify({ type, input }),
+      });
+      showToast(`已提交: ${type}`, "info");
+      setTimeout(loadProject, 500);
+    } catch (err) {
+      showToast(`${type} 提交失败: ${err.message}`);
+    }
+    setBusy(false);
+  };
+
+  if (!project) return <div className="page"><div className="empty-state">加载中…</div></div>;
+
+  const latestByType = {};
+  for (const r of runs) {
+    if (!latestByType[r.type] || new Date(r.createdAt) > new Date(latestByType[r.type].createdAt)) {
+      latestByType[r.type] = r;
+    }
+  }
+
+  const videoArtifacts = artifacts.filter((a) => a.type === "video");
+  const activeRun = runs.find((r) => r.status === "running");
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
-        <h2>配置</h2>
-
-        <div className="section-title">TTS 语音合成</div>
-        <div className="modal-field">
-          <label>Provider</label>
-          <select value={ttsProvider} onChange={(e) => update("TTS_PROVIDER", e.target.value)}>
-            <option value="openai">OpenAI 兼容（官方 / 硅基 / 火山 / OneAPI）</option>
-            <option value="mimo">MiMo（小米）</option>
-            <option value="edge">Edge TTS（免费本地）</option>
-          </select>
+    <div className="page">
+      <div className="page-header">
+        <div>
+          <span className="back-link" onClick={onBack}>← 项目列表</span>
+          <h2 className="page-title">{project.name}</h2>
+          <div className="page-subtitle">{project.srtPath}</div>
         </div>
-
-        {ttsProvider === "openai" && (
-          <>
-            <div className="modal-field">
-              <label>API Key</label>
-              <input type="password" value={config.TTS_API_KEY || ""} onChange={(e) => update("TTS_API_KEY", e.target.value)} placeholder="sk-…" />
-            </div>
-            <div className="modal-field">
-              <label>Base URL</label>
-              <input type="text" value={config.TTS_BASE_URL || ""} onChange={(e) => update("TTS_BASE_URL", e.target.value)} placeholder="https://api.openai.com/v1" />
-            </div>
-            <div className="modal-field">
-              <label>Model</label>
-              <input type="text" value={config.TTS_MODEL || ""} onChange={(e) => update("TTS_MODEL", e.target.value)} placeholder="gpt-4o-mini-tts" />
-            </div>
-            <div className="modal-field">
-              <label>Voice</label>
-              <input type="text" value={config.TTS_VOICE || ""} onChange={(e) => update("TTS_VOICE", e.target.value)} placeholder="alloy" />
-            </div>
-          </>
-        )}
-
-        {ttsProvider === "mimo" && (
-          <>
-            <div className="modal-field">
-              <label>MiMo API Key</label>
-              <input type="password" value={config.MIMO_API_KEY || ""} onChange={(e) => update("MIMO_API_KEY", e.target.value)} />
-            </div>
-            <div className="modal-field">
-              <label>Model</label>
-              <input type="text" value={config.MIMO_MODEL || ""} onChange={(e) => update("MIMO_MODEL", e.target.value)} placeholder="mimo-v2.5-tts" />
-            </div>
-            <div className="modal-field">
-              <label>Voice</label>
-              <select value={config.MIMO_VOICE || ""} onChange={(e) => update("MIMO_VOICE", e.target.value)}>
-                <option value="冰糖">冰糖</option>
-                <option value="茉莉">茉莉</option>
-                <option value="苏打">苏打</option>
-                <option value="白桦">白桦</option>
-                <option value="Mia">Mia</option>
-                <option value="Chloe">Chloe</option>
-                <option value="Milo">Milo</option>
-                <option value="Dean">Dean</option>
-              </select>
-            </div>
-          </>
-        )}
-
-        {ttsProvider === "edge" && (
-          <div className="modal-field">
-            <label>Voice</label>
-            <input type="text" value={config.TTS_VOICE || ""} onChange={(e) => update("TTS_VOICE", e.target.value)} placeholder="zh-CN-XiaoxiaoNeural" />
-          </div>
-        )}
-
-        {error && <div className="modal-error">{error}</div>}
-        <div className="modal-actions">
-          <button className="btn" onClick={onClose}>取消</button>
-          <button className="btn btn-primary" onClick={save} disabled={saving}>
-            {saving ? "保存中…" : "保存"}
-          </button>
+        <div>
+          <StatusPill status={activeRun ? "running" : "completed"} />
         </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="tabs">
+        <button className={`tab ${tab === "pipeline" ? "active" : ""}`} onClick={() => setTab("pipeline")}>工作流</button>
+        <button className={`tab ${tab === "artifacts" ? "active" : ""}`} onClick={() => setTab("artifacts")}>产物</button>
+        <button className={`tab ${tab === "runs" ? "active" : ""}`} onClick={() => setTab("runs")}>任务记录</button>
+      </div>
+
+      {tab === "pipeline" && (
+        <div className="pipeline-steps">
+          {RUN_STEPS.map((step, i) => {
+            const run = latestByType[step.type];
+            const status = run?.status || "pending";
+            return (
+              <div key={step.type} className="step">
+                <StepNumber index={i + 1} status={status} />
+                <div className="step-content">
+                  <div className="step-title">{step.title}</div>
+                  <div className="step-detail">{step.desc}</div>
+                  {run && (
+                    <div className="step-detail">
+                      <StatusPill status={run.status} />
+                      {run.progress > 0 && ` ${Math.round(run.progress * 100)}%`}
+                      {run.error && <span style={{ color: "var(--error)", marginLeft: "8px" }}>{run.error.slice(0, 60)}</span>}
+                    </div>
+                  )}
+                  {step.type !== "storyboard" && step.type !== "creators" && step.type !== "init" && (
+                    <div className="step-actions">
+                      <button className="btn" disabled={busy || status === "running"}
+                        onClick={() => startRun(step.type)}>
+                        {status === "running" ? "执行中…" : step.title === "渲染输出" ? "渲染" : step.title === "语音合成" ? "生成语音" : step.title}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {tab === "artifacts" && (
+        <div>
+          {artifacts.length === 0 ? (
+            <div className="empty-state">暂无产物。执行工作流步骤后将在此处显示。</div>
+          ) : (
+            <div className="card-list">
+              {artifacts.map((a) => (
+                <div key={a.id} className="card">
+                  <div className="card-title">{a.name}</div>
+                  <div className="card-detail">
+                    {a.type} · <StatusPill status={a.status} />
+                  </div>
+                  {a.filePath && <div className="card-detail" style={{ fontFamily: "var(--font-mono)", fontSize: "11px" }}>{a.filePath}</div>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === "runs" && (
+        <div>
+          {runs.length === 0 ? (
+            <div className="empty-state">暂无任务记录</div>
+          ) : (
+            <div className="card-list">
+              {runs.map((r) => (
+                <div key={r.id} className="card">
+                  <div className="card-title">
+                    {r.type} · <StatusPill status={r.status} />
+                  </div>
+                  <div className="card-detail">
+                    {r.progress > 0 && `${Math.round(r.progress * 100)}% · `}
+                    {new Date(r.createdAt).toLocaleString()}
+                    {r.error && ` · ${r.error.slice(0, 60)}`}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 视频预览 */}
+      {videoArtifacts.length > 0 && videoArtifacts.some((a) => a.filePath) && (
+        <div className="video-preview">
+          <div className="section-title">视频预览</div>
+          <video controls src={`/api/artifacts/${videoArtifacts[videoArtifacts.length - 1].id}/download`} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Providers ───────────────────────────────────────────
+
+function ProvidersPage() {
+  const [capabilities, setCapabilities] = useState([]);
+  const [testResults, setTestResults] = useState({});
+
+  useEffect(() => {
+    api("/api/providers").then((data) => setCapabilities(data.capabilities || []));
+  }, []);
+
+  const testProvider = async (type) => {
+    setTestResults((prev) => ({ ...prev, [type]: { testing: true } }));
+    try {
+      const result = await api(`/api/providers/${type}/test`, { method: "POST" });
+      setTestResults((prev) => ({ ...prev, [type]: result }));
+    } catch (err) {
+      setTestResults((prev) => ({ ...prev, [type]: { ok: false, message: err.message, latencyMs: 0 } }));
+    }
+  };
+
+  return (
+    <div className="page">
+      <div className="page-header">
+        <h2 className="page-title">Provider</h2>
+      </div>
+      <div className="card-list">
+        {capabilities.map((cap) => {
+          const result = testResults[cap.type];
+          return (
+            <div key={cap.type} className="card">
+              <div className="card-title">{cap.type}</div>
+              <div className="card-detail">
+                操作: {cap.operations.join(", ")}
+              </div>
+              {cap.requiredConfig.length > 0 && (
+                <div className="card-detail">必需配置: {cap.requiredConfig.join(", ")}</div>
+              )}
+              <div className="card-actions">
+                <button className="btn" onClick={() => testProvider(cap.type)} disabled={result?.testing}>
+                  {result?.testing ? "测试中…" : "测试连通性"}
+                </button>
+                {result && !result.testing && (
+                  <span style={{
+                    color: result.ok ? "var(--success)" : "var(--error)",
+                    fontSize: "13px",
+                    marginLeft: "8px",
+                  }}>
+                    {result.ok ? "✓" : "×"} {result.message} ({result.latencyMs}ms)
+                  </span>
+                )}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
 }
 
-// ── 新建项目模态框 ───────────────────────────────────────
-function InitModal({ onClose, onInitiated }) {
-  useEscapeKey(onClose);
+// ── Settings ────────────────────────────────────────────
+
+function SettingsPage({ showToast }) {
+  const [config, setConfig] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    api("/api/config")
+      .then((data) => { setConfig(data.config || {}); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
+
+  const update = (k, v) => setConfig({ ...config, [k]: v });
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await api("/api/config", { method: "PUT", body: JSON.stringify({ config }) });
+      showToast("配置已保存", "info");
+    } catch (err) {
+      showToast(`保存失败: ${err.message}`);
+    }
+    setSaving(false);
+  };
+
+  if (loading) return <div className="page"><div className="empty-state">加载中…</div></div>;
+
+  const provider = config.TTS_PROVIDER || "openai";
+
+  return (
+    <div className="page">
+      <div className="page-header">
+        <h2 className="page-title">设置</h2>
+      </div>
+
+      <div className="section-title">TTS 语音合成</div>
+      <div className="form-group">
+        <label>Provider</label>
+        <select value={provider} onChange={(e) => update("TTS_PROVIDER", e.target.value)}>
+          <option value="openai">OpenAI 兼容</option>
+          <option value="mimo">MiMo（小米）</option>
+          <option value="edge">Edge TTS（免费）</option>
+        </select>
+      </div>
+
+      {provider === "openai" && (
+        <>
+          <div className="form-group">
+            <label>API Key</label>
+            <input type="password" value={config.TTS_API_KEY || ""} onChange={(e) => update("TTS_API_KEY", e.target.value)} placeholder="sk-…" />
+          </div>
+          <div className="form-group">
+            <label>Base URL</label>
+            <input type="text" value={config.TTS_BASE_URL || ""} onChange={(e) => update("TTS_BASE_URL", e.target.value)} />
+          </div>
+          <div className="form-group">
+            <label>Model</label>
+            <input type="text" value={config.TTS_MODEL || ""} onChange={(e) => update("TTS_MODEL", e.target.value)} />
+          </div>
+          <div className="form-group">
+            <label>Voice</label>
+            <input type="text" value={config.TTS_VOICE || ""} onChange={(e) => update("TTS_VOICE", e.target.value)} />
+          </div>
+        </>
+      )}
+
+      {provider === "mimo" && (
+        <>
+          <div className="form-group">
+            <label>MiMo API Key</label>
+            <input type="password" value={config.MIMO_API_KEY || ""} onChange={(e) => update("MIMO_API_KEY", e.target.value)} />
+          </div>
+          <div className="form-group">
+            <label>Model</label>
+            <input type="text" value={config.MIMO_MODEL || ""} onChange={(e) => update("MIMO_MODEL", e.target.value)} />
+          </div>
+          <div className="form-group">
+            <label>Voice</label>
+            <select value={config.MIMO_VOICE || ""} onChange={(e) => update("MIMO_VOICE", e.target.value)}>
+              <option value="冰糖">冰糖</option><option value="茉莉">茉莉</option>
+              <option value="苏打">苏打</option><option value="白桦">白桦</option>
+              <option value="Mia">Mia</option><option value="Chloe">Chloe</option>
+              <option value="Milo">Milo</option><option value="Dean">Dean</option>
+            </select>
+          </div>
+        </>
+      )}
+
+      {provider === "edge" && (
+        <div className="form-group">
+          <label>Voice</label>
+          <input type="text" value={config.TTS_VOICE || ""} onChange={(e) => update("TTS_VOICE", e.target.value)} placeholder="zh-CN-XiaoxiaoNeural" />
+        </div>
+      )}
+
+      <div style={{ marginTop: "24px" }}>
+        <button className="btn btn-primary" onClick={save} disabled={saving}>
+          {saving ? "保存中…" : "保存配置"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── New Project Modal ───────────────────────────────────
+
+function NewProjectModal({ onClose, onCreated }) {
   const [srtPath, setSrtPath] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -229,7 +588,7 @@ function InitModal({ onClose, onInitiated }) {
         method: "POST",
         body: JSON.stringify({ srtPath: srtPath.trim() }),
       });
-      onInitiated(result.projectRoot);
+      onCreated(result.projectRoot || result.projectId);
       onClose();
     } catch (err) {
       setError(err.message);
@@ -238,262 +597,105 @@ function InitModal({ onClose, onInitiated }) {
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
-        <h2>新建视频项目</h2>
-        <div className="modal-field">
-          <label>SRT 字幕文件路径</label>
-          <input
-            type="text"
-            value={srtPath}
-            onChange={(e) => setSrtPath(e.target.value)}
-            placeholder="C:/path/to/subtitle.srt"
-            autoFocus
-            onKeyDown={(e) => e.key === "Enter" && !loading && start()}
-          />
-        </div>
-        {error && <div className="modal-error">{error}</div>}
-        <div className="modal-actions">
-          <button className="btn" onClick={onClose}>取消</button>
-          <button className="btn btn-primary" onClick={start} disabled={loading}>
-            {loading ? "初始化中…" : "开始"}
-          </button>
-        </div>
-      </div>
-    </div>
+    <Modal title="新建视频项目" onClose={onClose}>
+      <ModalField label="SRT 字幕文件路径">
+        <input type="text" value={srtPath} onChange={(e) => setSrtPath(e.target.value)}
+          placeholder="C:/path/to/subtitle.srt" autoFocus
+          onKeyDown={(e) => e.key === "Enter" && !loading && start()} />
+      </ModalField>
+      {error && <div className="modal-error">{error}</div>}
+      <ModalActions onClose={onClose} onSubmit={start} submitLabel="开始" submitting={loading} />
+    </Modal>
   );
 }
 
-// ── 主应用 ───────────────────────────────────────────────
+// ════════════════════════════════════════════════════════
+// Main App
+// ════════════════════════════════════════════════════════
+
 function App() {
+  const [page, setPage] = useState("dashboard");
+  const [projectId, setProjectId] = useState(null);
   const [projects, setProjects] = useState([]);
-  const [currentProject, setCurrentProject] = useState(null);
-  const [pipelineState, setPipelineState] = useState(null);
-  const [logs, setLogs] = useState([]);
-  const [renderProgress, setRenderProgress] = useState(0);
-  const [showConfig, setShowConfig] = useState(false);
-  const [showInit, setShowInit] = useState(false);
-  const [srtDir, setSrtDir] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [allRuns, setAllRuns] = useState([]);
   const [toast, setToast] = useState(null);
+  const [showNewProject, setShowNewProject] = useState(false);
 
-  const refreshProjects = useCallback(async () => {
-    if (!srtDir) return;
+  const showToast = useCallback((message, level = "error") => {
+    setToast({ message, level, ts: Date.now() });
+  }, []);
+
+  const loadProjects = useCallback(async () => {
     try {
-      const data = await api(`/api/projects?srtDir=${encodeURIComponent(srtDir)}`);
+      const data = await api("/api/projects");
       setProjects(data.projects || []);
-    } catch {
-      setProjects([]);
-    }
-  }, [srtDir]);
+    } catch { setProjects([]); }
+  }, []);
 
-  useEffect(() => {
-    if (!currentProject) return;
-    let cancelled = false;
-    api(`/api/pipeline/${encodeURIComponent(currentProject)}`)
-      .then((s) => { if (!cancelled) setPipelineState(s); })
-      .catch(() => { if (!cancelled) setPipelineState(null); });
-    setLogs([]);
-    setRenderProgress(0);
-    return () => { cancelled = true; };
-  }, [currentProject]);
+  useEffect(() => { loadProjects(); }, [loadProjects]);
 
-  useEffect(() => {
-    if (!currentProject) return;
-    const encoded = encodeURIComponent(currentProject);
-    const es = new EventSource(`/api/events?projectRoot=${encoded}`);
-
-    es.addEventListener("state", (e) => {
-      const data = JSON.parse(e.data);
-      if (data.projectRoot === currentProject) setPipelineState(data.state);
-    });
-
-    es.addEventListener("log", (e) => {
-      const data = JSON.parse(e.data);
-      if (data.projectRoot === currentProject) {
-        setLogs((prev) => [...prev.slice(-200), data.entry]);
-      }
-    });
-
-    es.addEventListener("render-progress", (e) => {
-      const data = JSON.parse(e.data);
-      if (data.projectRoot === currentProject) setRenderProgress(data.progress);
-    });
-
-    es.addEventListener("error", () => {
-      if (es.readyState === EventSource.CLOSED) {
-        setLogs((prev) => [...prev, {
-          level: "error",
-          message: "实时连接已断开，请刷新页面",
-          timestamp: new Date().toISOString(),
-        }]);
-      }
-    });
-
-    return () => es.close();
-  }, [currentProject]);
-
-  const showToast = (msg, level = "error") => {
-    setToast({ message: msg, level, ts: Date.now() });
-    setTimeout(() => setToast(null), 5000);
+  const navigate = (page, id = null) => {
+    setPage(page);
+    setProjectId(id);
   };
 
-  const runAction = async (endpoint, body = {}, label = "执行") => {
-    if (!currentProject || busy) return;
-    setBusy(true);
-    try {
-      await api(endpoint, { method: "POST", body: JSON.stringify({ projectRoot: currentProject, ...body }) });
-      showToast(`${label}完成`, "info");
-    } catch (err) {
-      setLogs((prev) => [...prev, { level: "error", message: `${label}失败: ${err.message}`, timestamp: new Date().toISOString() }]);
-      showToast(`${label}失败: ${err.message}`, "error");
-    }
-    setBusy(false);
-  };
-
-  const steps = pipelineState?.steps || {};
-  const tts = pipelineState?.tts || {};
-  const video = pipelineState?.video || {};
-  const hasVideo = video.path !== null;
+  const navItems = [
+    { key: "dashboard", label: "控制台" },
+    { key: "projects", label: "项目" },
+    { key: "providers", label: "Provider" },
+    { key: "settings", label: "设置" },
+  ];
 
   return (
     <div className="app">
-      <div className="header">
-        <div className="header-left">
-          <h1>Remotion Video 控制台</h1>
-          <div className="subtitle">SRT 字幕驱动的视频生成工作流</div>
+      {/* 侧边导航 */}
+      <nav className="nav">
+        <div className="nav-brand">
+          <div className="nav-brand-title">Remotion Video</div>
+          <div className="nav-brand-sub">项目服务</div>
         </div>
-        <div className="header-right">
-          <input
-            type="text"
-            placeholder="SRT 目录路径"
-            value={srtDir}
-            onChange={(e) => setSrtDir(e.target.value)}
-            style={{ width: "200px" }}
+        {navItems.map((item) => (
+          <button key={item.key}
+            className={`nav-item ${page === item.key ? "active" : ""}`}
+            onClick={() => navigate(item.key)}>
+            {item.label}
+          </button>
+        ))}
+      </nav>
+
+      {/* 主内容 */}
+      <main className="main">
+        {page === "dashboard" && (
+          <DashboardPage
+            projects={projects}
+            runs={allRuns}
+            onNavigate={navigate}
+            onNewProject={() => setShowNewProject(true)}
           />
-          <button className="btn" onClick={refreshProjects}>刷新</button>
-          <select
-            value={currentProject || ""}
-            onChange={(e) => setCurrentProject(e.target.value)}
-            style={{ width: "180px" }}
-          >
-            <option value="">选择项目…</option>
-            {projects.map((p) => (
-              <option key={p.projectRoot} value={p.projectRoot}>
-                {p.name} {p.hasVideo ? "✓" : ""}
-              </option>
-            ))}
-          </select>
-          <button className="btn btn-primary" onClick={() => setShowInit(true)}>新建</button>
-          <button className="btn" onClick={() => setShowConfig(true)}>配置</button>
-        </div>
-      </div>
+        )}
+        {page === "projects" && (
+          <ProjectsPage
+            projects={projects}
+            onNavigate={navigate}
+            onNewProject={() => setShowNewProject(true)}
+          />
+        )}
+        {page === "project" && projectId && (
+          <ProjectPage
+            projectId={projectId}
+            onBack={() => navigate("projects")}
+            showToast={showToast}
+          />
+        )}
+        {page === "providers" && <ProvidersPage />}
+        {page === "settings" && <SettingsPage showToast={showToast} />}
+      </main>
 
-      <div className="main">
-        <div className="sidebar">
-          <div className="section-title">工作流</div>
-
-          <PipelineStep index={1} title="初始化"
-            detail={steps.init?.result?.projectRoot ? "项目已创建" : "等待 SRT 文件"}
-            step={steps.init} />
-
-          <PipelineStep index={2} title="分镜生成"
-            detail={steps.storyboard?.result?.sceneCount
-              ? `${steps.storyboard.result.sceneCount} 个场景`
-              : "需要 Agent 执行（AI 语义分组）"}
-            step={steps.storyboard} />
-
-          <PipelineStep index={3} title="场景组件"
-            detail={steps.creators?.total
-              ? `${steps.creators.total} 个 Creator 并行`
-              : "需要 Agent 执行（AI 生成组件）"}
-            step={steps.creators}>
-            {steps.creators?.creators?.length > 0 && (
-              <div className="creator-list">
-                {steps.creators.creators.map((c) => (
-                  <CreatorCard key={c.id} creator={c} />
-                ))}
-              </div>
-            )}
-          </PipelineStep>
-
-          <PipelineStep index={4} title="场景注册"
-            detail={steps.registry?.result?.sceneCount
-              ? `${steps.registry.result.sceneCount} 个场景已注册`
-              : "生成 generated-scenes.ts"}
-            step={steps.registry}
-            onAction={() => runAction("/api/run/registry", {}, "场景注册")}
-            actionLabel="注册" disabled={!currentProject || busy} />
-
-          <PipelineStep index={5} title="校验"
-            detail={steps.validate?.status === "done" ? "通过" : "渲染前检查"}
-            step={steps.validate}
-            onAction={() => runAction("/api/run/validate", {}, "校验")}
-            actionLabel="校验" disabled={!currentProject || busy} />
-
-          <PipelineStep index={6} title="语音合成"
-            detail={tts.status === "done"
-              ? `${tts.provider} · ${tts.segments.done} 段`
-              : "可选：为视频添加配音"}
-            step={{ status: tts.status === "idle" ? "pending" : tts.status }}
-            onAction={() => runAction("/api/run/tts", {}, "语音合成")}
-            actionLabel="生成语音" disabled={!currentProject || busy} />
-
-          <PipelineStep index={7} title="渲染输出"
-            detail={steps.render?.status === "done"
-              ? `${video.sizeMB} MB`
-              : steps.render?.status === "running"
-              ? `渲染中 ${Math.round(renderProgress * 100)}%`
-              : "输出 MP4"}
-            step={steps.render}
-            onAction={() => runAction("/api/run/render", {}, "渲染")}
-            actionLabel="渲染" disabled={!currentProject || busy} />
-
-          {steps.render?.status === "running" && (
-            <div className="progress-bar">
-              <div className="progress-fill" style={{ width: `${renderProgress * 100}%` }} />
-            </div>
-          )}
-        </div>
-
-        <div className="content">
-          <div className="preview-area">
-            <div className="video-container">
-              {hasVideo ? (
-                <>
-                  <video controls
-                    src={`/api/video/${encodeURIComponent(currentProject)}`} />
-                  <div style={{ marginTop: "16px" }}>
-                    <a className="btn btn-primary"
-                      href={`/api/video/${encodeURIComponent(currentProject)}`}
-                      download="output.mp4">
-                      下载 MP4（{video.sizeMB} MB）
-                    </a>
-                  </div>
-                </>
-              ) : (
-                <div className="preview-placeholder">
-                  {currentProject
-                    ? "完成工作流步骤后，视频将在此处呈现"
-                    : <><strong>选择或新建</strong>一个项目开始</>}
-                </div>
-              )}
-            </div>
-          </div>
-
-          <LogPanel logs={logs} />
-        </div>
-      </div>
-
-      {toast && (
-        <div className={`toast ${toast.level}`}>{toast.message}</div>
-      )}
-
-      {showConfig && <ConfigModal onClose={() => setShowConfig(false)} onSave={() => {}} />}
-      {showInit && (
-        <InitModal
-          onClose={() => setShowInit(false)}
-          onInitiated={(pr) => { setCurrentProject(pr); setShowInit(false); }}
+      <Toast toast={toast} onClose={() => setToast(null)} />
+      {showNewProject && (
+        <NewProjectModal
+          onClose={() => setShowNewProject(false)}
+          onCreated={() => { loadProjects(); }}
         />
       )}
     </div>
@@ -503,7 +705,7 @@ function App() {
 // ── Mount ───────────────────────────────────────────────
 function mountApp() {
   if (typeof ReactDOM === "undefined" || typeof React === "undefined") {
-    document.getElementById("root").innerHTML = '<div style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;color:#999;font-family:Georgia,serif;">正在加载 React…</div>';
+    document.getElementById("root").innerHTML = '<div style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;color:#999;font-family:Georgia,serif;">正在加载…</div>';
     setTimeout(mountApp, 200);
     return;
   }
