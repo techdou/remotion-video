@@ -7,10 +7,12 @@
 
 import express from "express";
 import { createReadStream, existsSync, statSync } from "node:fs";
-import { join, basename, dirname } from "node:path";
+import { join, basename, dirname, resolve } from "node:path";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { EventEmitter } from "node:events";
 import {
-  getProject, listProjects, updateProject,
+  getProject, listProjects, updateProject, createProject,
   getRun, listRuns, getRunEvents,
   listArtifacts, getArtifact, setArtifactStatus,
   updateRunStatus,
@@ -51,6 +53,55 @@ export function createApiServer(): express.Express {
   // ═══ Projects ═══
   app.get("/api/projects", (_req, res) => {
     res.json({ projects: listProjects() });
+  });
+
+  // 创建项目：创建 DB 记录 + 提交 init run（异步，立即返回）
+  app.post("/api/projects", async (req, res) => {
+    const { srtPath } = req.body;
+    if (!srtPath || !existsSync(srtPath)) {
+      return res.status(400).json({ error: "srtPath 不存在" });
+    }
+
+    const queue = getRunQueue();
+    // 智能定位 skill root：兼容开发模式（server/api/）和编译模式（dist/）
+    const moduleDir = dirname(fileURLToPath(import.meta.url));
+    const SKILL_ROOT = existsSync(join(moduleDir, "..", "scripts"))
+      ? resolve(moduleDir, "..")       // 编译模式: dist/index.js → skill root
+      : resolve(moduleDir, "..", ".."); // 开发模式: server/api/index.ts → skill root
+
+    try {
+      // 先跑 ensure-template-deps + init-project（同步等待）
+      const depsResult = await runScriptAsync("node", [
+        join(SKILL_ROOT, "scripts", "ensure-template-deps.js"),
+        join(SKILL_ROOT, "template"),
+      ]);
+      if (!depsResult.success) {
+        return res.status(500).json({ error: "依赖安装失败", details: depsResult });
+      }
+
+      const initResult = await runScriptAsync("node", [
+        join(SKILL_ROOT, "scripts", "init-project.js"),
+        "--srt-path", srtPath,
+      ]);
+      if (!initResult.success) {
+        return res.status(500).json({ error: "项目初始化失败", details: initResult });
+      }
+
+      // 在 SQLite 注册项目
+      const project = createProject({
+        name: initResult.output?.projectName || new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-"),
+        srtPath,
+        projectRoot: initResult.output?.projectRoot || "",
+      });
+
+      // init 已同步执行完，标记为完成
+      const run = queue.submit(project.id, "init", { runType: "init" });
+      updateRunStatus(run.id, "completed", { output: initResult.output });
+
+      res.json({ project, runId: run.id });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
   });
 
   app.get("/api/projects/:id", (req, res) => {
@@ -231,6 +282,55 @@ export function createApiServer(): express.Express {
   });
 
   return app;
+}
+
+// ═══ 辅助：运行脚本并解析输出 ════════════════════════════
+
+const SENTINELS = ["__RESULT_JSON__", "__TTS_RESULT__", "__MERGE_RESULT__"];
+
+function runScriptAsync(bin: string, args: string[]): Promise<{ success: boolean; output?: any; error?: string }> {
+  return new Promise((resolvePromise) => {
+    const child = spawn(bin, args, {
+      cwd: process.cwd(),
+      env: { ...process.env, FORCE_COLOR: "0" },
+    });
+
+    let stdoutBuffer = "";
+    let stderrBuffer = "";
+
+    child.stdout.on("data", (chunk) => { stdoutBuffer += chunk.toString(); });
+    child.stderr.on("data", (chunk) => { stderrBuffer += chunk.toString(); });
+
+    child.on("close", (code) => {
+      const result = parseOutput(stdoutBuffer, code);
+      resolvePromise(result);
+    });
+
+    child.on("error", (err) => {
+      resolvePromise({ success: false, error: err.message });
+    });
+  });
+}
+
+function parseOutput(stdout: string, exitCode: number | null): { success: boolean; output?: any; error?: string } {
+  const trimmed = stdout.trim();
+  if (!trimmed) return { success: exitCode === 0 };
+
+  for (const sentinel of SENTINELS) {
+    const idx = trimmed.lastIndexOf(sentinel);
+    if (idx !== -1) {
+      try {
+        const parsed = JSON.parse(trimmed.slice(idx + sentinel.length).trim());
+        return { success: parsed.success !== false, output: parsed };
+      } catch { continue; }
+    }
+  }
+  try {
+    const parsed = JSON.parse(trimmed);
+    return { success: parsed.success !== false, output: parsed };
+  } catch {
+    return { success: exitCode === 0, error: trimmed.slice(-300) };
+  }
 }
 
 /**

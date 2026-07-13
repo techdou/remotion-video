@@ -6,7 +6,7 @@
  */
 
 import { readFileSync, existsSync } from "node:fs";
-import { join, dirname, resolve } from "node:path";
+import { join, dirname, resolve, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -86,7 +86,6 @@ export function maskConfig(config: Record<string, string>): Record<string, strin
  * 验证路径在允许的项目基目录下（防路径穿越）
  */
 export function validateProjectPath(projectRoot: string): string {
-  const { basename, dirname } = require("node:path");
   const resolved = resolve(projectRoot);
   const parentName = basename(dirname(resolved));
   if (parentName !== "remotion-video-projects") {

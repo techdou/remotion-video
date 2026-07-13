@@ -236,11 +236,11 @@
       setLoading(true);
       setError(null);
       try {
-        const result = await api("/api/run/init", {
+        const result = await api("/api/projects", {
           method: "POST",
           body: JSON.stringify({ srtPath: srtPath.trim() })
         });
-        onCreated(result.projectRoot || result.projectId);
+        onCreated(result.project?.id);
         onClose();
       } catch (err) {
         setError(err.message);
