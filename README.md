@@ -64,7 +64,7 @@ npx remotion render Main out/output-4k.mp4 --scale 2
 
 ### 4. AI 语音播报（TTS 配音）
 
-按 SRT 字幕自动生成语音并合并为完整音轨，添加到视频中。支持两种 provider：
+按 SRT 字幕自动生成语音并合并为完整音轨，添加到视频中。支持三种 provider：
 
 ```bash
 # 步骤 1: 按 SRT 每段字幕生成语音

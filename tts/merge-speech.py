@@ -59,7 +59,8 @@ def main():
     # 每段语音 → adelay(开始时间) → 混合到一路
     inputs = []
     filters = []
-    for i, seg in enumerate(segments):
+    input_idx = 0  # 连续的输入索引（跳过缺失文件时不递增）
+    for seg in segments:
         audio_file = seg["file"]
         if not Path(audio_file).exists():
             print(f"警告: 跳过缺失文件 {audio_file}")
@@ -67,14 +68,15 @@ def main():
         inputs.extend(["-i", str(audio_file)])
         delay_ms = seg["start_ms"]
         # adelay 把音频推迟到指定时间点播放（前面补静音）
-        filters.append(f"[{i}:a]adelay={delay_ms}|{delay_ms}[d{i}]")
+        filters.append(f"[{input_idx}:a]adelay={delay_ms}|{delay_ms}[d{input_idx}]")
+        input_idx += 1
 
     if not filters:
         print("错误: 无可用的音频分段文件")
         sys.exit(1)
 
     # 混合所有延迟后的音频流
-    n_inputs = len(filters)
+    n_inputs = input_idx
     mix_inputs = "".join(f"[d{i}]" for i in range(n_inputs))
     filter_complex = ";".join(filters) + f";{mix_inputs}amix=inputs={n_inputs}:duration=longest:dropout_transition=0[aout]"
 

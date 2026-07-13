@@ -15,10 +15,11 @@ import { updateStep, emitLog, emitRenderProgress } from "./pipeline-state.js";
 import { existsSync, statSync } from "node:fs";
 import { resolve, join } from "node:path";
 
-// 匹配百分比的正则
+// 匹配百分比的正则（如 "45%" 或 "Render 45%"）
 const PERCENT_RE = /(\d+(?:\.\d+)?)\s*%/;
-// 匹配帧号的正则
-const FRAME_RE = /frame\s+(\d+)\s*\/?\s*(\d+)?/i;
+// 匹配帧号的正则（覆盖多种 Remotion 输出格式）
+// "frame 450/1000"、"450/1000 frames rendered"、"450 of 1000"
+const FRAME_RE = /(\d+)\s*\/\s*(\d+)\s*(?:frames?|rendered)?|frame\s+(\d+)\s*\/?\s*(\d+)?/i;
 
 /**
  * 渲染视频
@@ -50,8 +51,13 @@ export async function renderVideo(projectRoot, options = {}) {
           progress = parseFloat(pctMatch[1]) / 100;
         } else {
           const frameMatch = line.match(FRAME_RE);
-          if (frameMatch && frameMatch[2]) {
-            progress = parseInt(frameMatch[1]) / parseInt(frameMatch[2]);
+          if (frameMatch) {
+            // 新正则有两个分支：N/M 或 frame N/M
+            const current = frameMatch[1] || frameMatch[3];
+            const total = frameMatch[2] || frameMatch[4];
+            if (current && total) {
+              progress = parseInt(current) / parseInt(total);
+            }
           }
         }
 

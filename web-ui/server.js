@@ -38,29 +38,32 @@ app.use(express.json());
 // ── 静态文件 ──────────────────────────────────────────────
 app.use(express.static(resolve(__dirname, "public")));
 
-// ── CORS（方便开发）──────────────────────────────────────
+// ── CORS（仅允许 localhost 开发调试，防跨站篡改）──────────
 app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Origin", "*");
-  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS");
-  res.header("Access-Control-Allow-Headers", "Content-Type");
+  const origin = req.headers.origin;
+  if (origin && /^https?:\/\/localhost(:\d+)?$/.test(origin)) {
+    res.header("Access-Control-Allow-Origin", origin);
+    res.header("Access-Control-Allow-Methods", "GET, OPTIONS");
+    res.header("Access-Control-Allow-Headers", "Content-Type");
+  }
   next();
 });
 
 // ── 工具函数 ──────────────────────────────────────────────
 
-/** 安全解码 projectRoot 参数（base64 或原始路径）*/
+/** 安全解码 projectRoot 参数（URI 编码的路径）*/
 function decodePath(encoded) {
-  try {
-    // 尝试 base64 解码
-    const decoded = Buffer.from(encoded, "base64").toString("utf-8");
-    // 如果解码后像路径就用它，否则用原始值
-    if (decoded.includes("/") || decoded.includes("\\") || decoded.length > 2) {
-      return decoded;
-    }
-  } catch {
-    // 忽略
+  return decodeURIComponent(encoded);
+}
+
+/** 验证路径在允许的项目基目录下（防路径穿越）*/
+function validateProjectPath(projectRoot) {
+  const resolved = resolve(projectRoot);
+  // 必须包含 remotion-video-projects 段，防止 ../ 穿越
+  if (!resolved.includes("remotion-video-projects")) {
+    throw new Error("非法项目路径");
   }
-  return encoded;
+  return resolved;
 }
 
 /** 列出 SRT 目录下的所有项目 */
@@ -148,8 +151,57 @@ app.put("/api/config", (req, res) => {
   if (!config || typeof config !== "object") {
     return res.status(400).json({ error: "缺少 config 对象" });
   }
-  const lines = Object.entries(config).map(([k, v]) => `${k}=${v}`);
-  writeFileSync(envPath, lines.join("\n") + "\n", "utf-8");
+
+  // 读取现有 .env 内容（保留注释和未发送的变量）
+  let existingLines = [];
+  const existingConfig = {};
+  if (existsSync(envPath)) {
+    existingLines = readFileSync(envPath, "utf-8").split("\n");
+    for (const line of existingLines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eq = trimmed.indexOf("=");
+      if (eq === -1) continue;
+      const key = trimmed.slice(0, eq).trim();
+      existingConfig[key] = trimmed.slice(eq + 1).trim();
+    }
+  }
+
+  // 合并：只更新提交的非脱敏值（跳过含 *** 的脱敏占位符）
+  const merged = { ...existingConfig };
+  for (const [key, value] of Object.entries(config)) {
+    // 校验 key 只允许字母数字下划线（防注入）
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue;
+    // 跳过脱敏占位值
+    if (typeof value === "string" && value.endsWith("***")) continue;
+    // 拒绝换行符（防 .env 注入）
+    if (typeof value === "string" && /[\n\r]/.test(value)) continue;
+    merged[key] = value;
+  }
+
+  // 重写 .env：保留原有注释行，更新已知 key，追加新 key
+  const seenKeys = new Set();
+  const outputLines = existingLines.map((line) => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) return line;
+    const eq = trimmed.indexOf("=");
+    if (eq === -1) return line;
+    const key = trimmed.slice(0, eq).trim();
+    if (key in merged) {
+      seenKeys.add(key);
+      return `${key}=${merged[key]}`;
+    }
+    return line;
+  });
+
+  // 追加新 key（原 .env 中没有的）
+  for (const [key, value] of Object.entries(merged)) {
+    if (!seenKeys.has(key)) {
+      outputLines.push(`${key}=${value}`);
+    }
+  }
+
+  writeFileSync(envPath, outputLines.join("\n").replace(/\n+$/, "\n"), "utf-8");
   res.json({ ok: true });
 });
 
@@ -250,10 +302,11 @@ app.post("/api/run/tts", async (req, res) => {
   const { projectRoot } = req.body;
   if (!projectRoot) return res.status(400).json({ error: "缺少 projectRoot" });
 
-  const srtPath = join(projectRoot, "..", "..", basename(projectRoot) + ".srt");
-  // 也可能在 projectRoot 同级
   const state = readState(projectRoot);
-  const actualSrt = state?.srtPath || srtPath;
+  const actualSrt = state?.srtPath;
+  if (!actualSrt) {
+    return res.status(400).json({ error: "pipeline 状态缺失，无法确定 SRT 路径，请先初始化项目" });
+  }
   if (!existsSync(actualSrt)) {
     return res.status(400).json({ error: `SRT 文件不存在: ${actualSrt}` });
   }
@@ -334,7 +387,12 @@ app.get("/api/preview/:projectRoot", (req, res) => {
 
 // ── 视频 MP4 流式播放/下载 ───────────────────────────────
 app.get("/api/video/:projectRoot", (req, res) => {
-  const projectRoot = decodePath(req.params.projectRoot);
+  let projectRoot;
+  try {
+    projectRoot = validateProjectPath(decodePath(req.params.projectRoot));
+  } catch {
+    return res.status(403).json({ error: "非法项目路径" });
+  }
   const videoPath = join(projectRoot, "out", "output.mp4");
   if (!existsSync(videoPath)) {
     return res.status(404).json({ error: "视频尚未渲染" });

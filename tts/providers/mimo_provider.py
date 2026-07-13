@@ -121,7 +121,7 @@ def synthesize(text: str, config: dict) -> GeneratedAudio:
             response = json.loads(resp.read().decode("utf-8"))
     except HTTPError as e:
         body_text = e.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"MiMo TTS API error HTTP {e.code}: {body_text}") from e
+        raise RuntimeError(f"MiMo TTS API error HTTP {e.code}: {body_text[:200]}") from e
 
     # 提取音频：choices[0].message.audio.data 是 base64
     try:

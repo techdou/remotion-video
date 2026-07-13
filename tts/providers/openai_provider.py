@@ -86,7 +86,7 @@ def synthesize(text: str, config: dict) -> GeneratedAudio:
             audio_bytes = resp.read()
     except HTTPError as e:
         body_text = e.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"OpenAI TTS API error HTTP {e.code}: {body_text}") from e
+        raise RuntimeError(f"OpenAI TTS API error HTTP {e.code}: {body_text[:200]}") from e
 
     if not audio_bytes:
         raise RuntimeError("OpenAI TTS returned empty audio data")

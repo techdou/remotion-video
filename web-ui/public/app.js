@@ -81,23 +81,51 @@ function LogPanel({ logs }) {
 function ConfigModal({ onClose, onSave }) {
   const [config, setConfig] = useState({});
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    api("/api/config").then((data) => {
-      setConfig(data.config || {});
-      setLoading(false);
-    });
+    api("/api/config")
+      .then((data) => {
+        setConfig(data.config || {});
+        setLoading(false);
+      })
+      .catch((err) => {
+        setError(err.message);
+        setLoading(false);
+      });
   }, []);
 
   const update = (key, value) => setConfig({ ...config, [key]: value });
 
   const save = async () => {
-    await api("/api/config", { method: "PUT", body: JSON.stringify({ config }) });
-    onSave();
-    onClose();
+    setSaving(true);
+    setError(null);
+    try {
+      await api("/api/config", { method: "PUT", body: JSON.stringify({ config }) });
+      onSave();
+      onClose();
+    } catch (err) {
+      setError(err.message);
+    }
+    setSaving(false);
   };
 
-  if (loading) return <div className="modal-overlay"><div className="modal">加载中...</div></div>;
+  if (loading) return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>加载中...</div>
+    </div>
+  );
+  if (error && !config.TTS_PROVIDER) return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <p style={{color: "var(--error)"}}>加载失败: {error}</p>
+        <div className="modal-actions">
+          <button className="btn" onClick={onClose}>关闭</button>
+        </div>
+      </div>
+    </div>
+  );
 
   const ttsProvider = config.TTS_PROVIDER || "openai";
 
@@ -170,9 +198,12 @@ function ConfigModal({ onClose, onSave }) {
           </div>
         )}
 
+        {error && <div style={{color: "var(--error)", fontSize: "13px", marginBottom: "8px"}}>{error}</div>}
         <div className="modal-actions">
           <button className="btn" onClick={onClose}>取消</button>
-          <button className="btn btn-primary" onClick={save}>保存</button>
+          <button className="btn btn-primary" onClick={save} disabled={saving}>
+            {saving ? "保存中..." : "保存"}
+          </button>
         </div>
       </div>
     </div>
@@ -214,7 +245,7 @@ function InitModal({ onClose, onInitiated }) {
             onChange={(e) => setSrtPath(e.target.value)}
             placeholder="C:/path/to/subtitle.srt"
             autoFocus
-            onKeyDown={(e) => e.key === "Enter" && start()}
+            onKeyDown={(e) => e.key === "Enter" && !loading && start()}
           />
         </div>
         {error && <div style={{color: "var(--error)", fontSize: "13px", marginBottom: "8px"}}>{error}</div>}
@@ -256,7 +287,7 @@ function App() {
   // 选择项目时加载状态
   useEffect(() => {
     if (!currentProject) return;
-    api(`/api/pipeline/${encodeURIComponent(btoa(currentProject))}`)
+    api(`/api/pipeline/${encodeURIComponent(currentProject)}`)
       .then(setPipelineState)
       .catch(() => setPipelineState(null));
     setLogs([]);
@@ -266,7 +297,7 @@ function App() {
   // SSE 事件订阅
   useEffect(() => {
     if (!currentProject) return;
-    const encoded = encodeURIComponent(btoa(currentProject));
+    const encoded = encodeURIComponent(currentProject);
     const es = new EventSource(`/api/events?projectRoot=${encoded}`);
     eventSourceRef.current = es;
 
@@ -379,7 +410,7 @@ function App() {
             step={steps.registry}
             onAction={() => runAction("/api/run/registry", {}, "场景注册")}
             actionLabel="注册"
-            disabled={!currentProject}
+            disabled={!currentProject || busy}
           />
 
           <PipelineStep
@@ -388,7 +419,7 @@ function App() {
             step={steps.validate}
             onAction={() => runAction("/api/run/validate", {}, "校验")}
             actionLabel="校验"
-            disabled={!currentProject}
+            disabled={!currentProject || busy}
           />
 
           <PipelineStep
@@ -403,7 +434,7 @@ function App() {
             step={pipelineState?.tts ? { status: pipelineState.tts.status } : { status: "pending" }}
             onAction={() => runAction("/api/run/tts", {}, "TTS")}
             actionLabel="生成语音"
-            disabled={!currentProject}
+            disabled={!currentProject || busy}
           />
 
           <PipelineStep
@@ -418,7 +449,7 @@ function App() {
             step={steps.render}
             onAction={() => runAction("/api/run/render", {}, "渲染")}
             actionLabel="渲染"
-            disabled={!currentProject}
+            disabled={!currentProject || busy}
           />
 
           {/* Render progress bar */}
@@ -437,12 +468,12 @@ function App() {
                 <>
                   <video
                     controls
-                    src={`/api/video/${encodeURIComponent(btoa(currentProject))}`}
+                    src={`/api/video/${encodeURIComponent(currentProject)}`}
                   />
                   <div style={{marginTop: "12px"}}>
                     <a
                       className="btn btn-primary"
-                      href={`/api/video/${encodeURIComponent(btoa(currentProject))}`}
+                      href={`/api/video/${encodeURIComponent(currentProject)}`}
                       download="output.mp4"
                     >
                       ⬇ 下载 MP4 ({video.sizeMB} MB)

@@ -64,7 +64,7 @@ Checklist:
 
 ## Voiceover / TTS (optional)
 
-Generate speech audio from the SRT file and add it to the video. Two providers supported:
+Generate speech audio from the SRT file and add it to the video. Three providers supported:
 
 | Provider | Setup | Use case |
 |---|---|---|

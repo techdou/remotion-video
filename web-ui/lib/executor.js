@@ -64,9 +64,11 @@ export function runCommand(bin, args = [], options = {}) {
  */
 function _run(bin, args, { onProgress, cwd } = {}) {
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(bin, args, {
+    // Windows 上 npx 需要 .cmd 后缀；不用 shell:true 防止命令注入
+    const actualBin = process.platform === "win32" && bin === "npx" ? "npx.cmd" : bin;
+    const child = spawn(actualBin, args, {
       cwd: cwd || process.cwd(),
-      shell: process.platform === "win32",
+      shell: false,
       env: { ...process.env, FORCE_COLOR: "0" },
     });
 
