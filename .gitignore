@@ -1,0 +1,46 @@
+# ── Node.js 依赖（运行时自动安装）────────────────────────
+node_modules/
+
+# ── 敏感信息 / API 密钥（绝不入库）─────────────────────
+.env
+.env.*
+!.env.example
+*.secret
+*_api_key*
+*_token*
+credentials.json
+secrets.json
+
+# ── 生成产物（视频、项目输出等运行时文件）──────────────
+out/
+*.mp4
+*.webm
+*.mov
+
+# 工作流运行时生成的项目产物
+remotion-video-projects/
+scene-plans/
+public/audio.mp3
+
+# TTS 运行时产物（分段语音 + 合并音轨 + 清单）
+speech/
+speech-manifest.json
+*.mp3
+!template/**/*.mp3
+
+# ── 开发软件配置目录 / IDE ─────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── 操作系统产生的文件 ─────────────────────────────────
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ── 日志 / 临时文件 ────────────────────────────────────
+*.log
+.tmp/
+tmp/

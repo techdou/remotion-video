@@ -1,0 +1,14 @@
+{
+  "name": "remotion-video-web-ui",
+  "version": "1.0.0",
+  "description": "Web control panel for remotion-video skill",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0"
+  }
+}
