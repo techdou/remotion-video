@@ -97,7 +97,7 @@ export class RunQueue extends EventEmitter {
       }
     }
     if (stale.length > 0) {
-      console.log(`[RunQueue] Recovered ${stale.length} stale runs`);
+      console.error(`[RunQueue] Recovered ${stale.length} stale runs`);
     }
   }
 

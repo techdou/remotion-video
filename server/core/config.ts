@@ -11,8 +11,15 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// skill 根目录：从 dist/core/ 往上两级，或从 server/core/ 往上两级
-export const SKILL_ROOT = resolve(__dirname, "..", "..");
+// 智能定位 skill root：兼容开发模式（server/core/）和编译模式（dist/）
+// dist/index.js → 往上 1 级；server/core/config.ts → 往上 2 级
+const _candidate1 = resolve(__dirname, "..");       // 编译模式
+const _candidate2 = resolve(__dirname, "..", ".."); // 开发模式
+export const SKILL_ROOT = existsSync(join(_candidate1, ".env.example"))
+  ? _candidate1
+  : existsSync(join(_candidate2, ".env.example"))
+    ? _candidate2
+    : _candidate2;
 
 const ENV_PATH = join(SKILL_ROOT, ".env");
 
