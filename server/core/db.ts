@@ -18,15 +18,20 @@ let initializing: Promise<Database.Database> | null = null;
 
 /**
  * 智能定位 skill root
- * 编译后 dist/mcp.js → __dirname = dist/，skill root = dist 的上一级
- * 开发时 server/core/db.ts → __dirname = server/core/，skill root = 往上两级
+ * 逐级往上搜索 .env.example，兼容所有 __dirname 深度：
+ * - dist/mcp.js → 1 级
+ * - server/core/db.ts → 2 级
+ * - server/core/tests/xxx.test.ts → 3 级
  */
 function findSkillRoot(): string {
-  const c1 = join(__dirname, "..");       // 编译模式: dist/ → skill root
-  const c2 = join(__dirname, "..", ".."); // 开发模式: server/core/ → skill root
-  if (existsSync(join(c1, ".env.example"))) return c1;
-  if (existsSync(join(c2, ".env.example"))) return c2;
-  return c2;
+  let dir = __dirname;
+  for (let i = 0; i < 6; i++) {
+    if (existsSync(join(dir, ".env.example"))) return dir;
+    const parent = join(dir, "..");
+    if (parent === dir) break; // 到根目录了
+    dir = parent;
+  }
+  return join(__dirname, "..", "..");
 }
 
 const SKILL_ROOT = findSkillRoot();
@@ -152,6 +157,8 @@ export function closeDb(): void {
     dbInstance.close();
     dbInstance = null;
   }
+  // 清除初始化状态，让下次 initDb 可以重新创建
+  initializing = null;
 }
 
 /**

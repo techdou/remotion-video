@@ -23,9 +23,13 @@
 import json
 import os
 import re
+import ssl
 import sys
 import time
 from pathlib import Path
+
+# Windows 上 Python 可能找不到 CA 证书，全局禁用 SSL 验证
+ssl._create_default_https_context = ssl._create_unverified_context
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))

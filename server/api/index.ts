@@ -14,7 +14,7 @@ import { EventEmitter } from "node:events";
 import {
   getProject, listProjects, updateProject, createProject,
   getRun, listRuns, getRunEvents,
-  listArtifacts, getArtifact, setArtifactStatus,
+  listArtifacts, getArtifact, setArtifactStatus, createArtifact,
   updateRunStatus,
 } from "../core/storage.js";
 import { getRunQueue } from "../core/run-queue.js";
@@ -162,6 +162,23 @@ export function createApiServer(): express.Express {
   app.get("/api/projects/:id/artifacts", (req, res) => {
     const type = req.query.type as string | undefined;
     res.json({ artifacts: listArtifacts(req.params.id, type as any) });
+  });
+
+  // 手动注册 artifact（Agent 直接跑脚本后注册产物）
+  app.post("/api/projects/:id/artifacts", (req, res) => {
+    const { type, name, filePath, status, meta } = req.body;
+    if (!type || !name) return res.status(400).json({ error: "type and name required" });
+    const project = getProject(req.params.id);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+    const artifact = createArtifact({
+      projectId: project.id,
+      type,
+      name,
+      filePath: filePath || null,
+      status: status || "candidate",
+      meta,
+    });
+    res.json(artifact);
   });
 
   app.get("/api/artifacts/:id", (req, res) => {

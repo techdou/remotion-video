@@ -22,9 +22,15 @@ import { RUN_TYPES } from "../core/types.js";
 import type { RunType, ArtifactStatus } from "../core/types.js";
 
 async function startMcpServer() {
-  await initDb();
-  const queue = getRunQueue();
-  queue.start();
+  // DB 初始化失败不 crash，记录到 stderr 继续（MCP 协议走 stdio，stderr 不影响）
+  let queue: any = null;
+  try {
+    await initDb();
+    queue = getRunQueue();
+    queue.start();
+  } catch (err) {
+    console.error("[MCP] WARNING: DB init failed, running in degraded mode:", err);
+  }
 
   const server = new McpServer({
     name: "remotion-video",

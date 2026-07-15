@@ -23,10 +23,16 @@
 
 import base64
 import json
+import ssl
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError
 
 from providers.base import GeneratedAudio, validate_config
+
+# Windows 上 Python 可能找不到 CA 证书，禁用 SSL 验证
+_SSL_CONTEXT = ssl.create_default_context()
+_SSL_CONTEXT.check_hostname = False
+_SSL_CONTEXT.verify_mode = ssl.CERT_NONE
 
 DEFAULT_BASE_URL = "https://api.xiaomimimo.com/v1"
 ENDPOINT_PATH = "/chat/completions"
@@ -117,7 +123,7 @@ def synthesize(text: str, config: dict) -> GeneratedAudio:
         req.add_header(k, v)
 
     try:
-        with urlopen(req, timeout=120) as resp:
+        with urlopen(req, timeout=120, context=_SSL_CONTEXT) as resp:
             response = json.loads(resp.read().decode("utf-8"))
     except HTTPError as e:
         body_text = e.read().decode("utf-8", errors="replace")

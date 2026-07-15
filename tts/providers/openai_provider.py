@@ -17,10 +17,18 @@ OneAPI / New API 等），通过 TTS_BASE_URL 切换平台。
 """
 
 import json
+import ssl
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError
 
 from providers.base import GeneratedAudio, validate_config
+
+_SSL_CONTEXT = ssl.create_default_context()
+try:
+    _SSL_CONTEXT.load_default_certs()
+except Exception:
+    _SSL_CONTEXT.check_hostname = False
+    _SSL_CONTEXT.verify_mode = ssl.CERT_NONE
 
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
 SPEECH_PATH = "/audio/speech"
@@ -82,7 +90,7 @@ def synthesize(text: str, config: dict) -> GeneratedAudio:
     req.add_header("Authorization", f"Bearer {api_key}")
 
     try:
-        with urlopen(req, timeout=120) as resp:
+        with urlopen(req, timeout=120, context=_SSL_CONTEXT) as resp:
             audio_bytes = resp.read()
     except HTTPError as e:
         body_text = e.read().decode("utf-8", errors="replace")

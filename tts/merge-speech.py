@@ -32,6 +32,9 @@ def main():
     speech_dir = Path(args[0])
     output_path = Path(args[1])
 
+    # 自动创建输出目录（如 public/）
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
     manifest_path = speech_dir / "speech-manifest.json"
     if not manifest_path.exists():
         print(f"错误: 找不到 {manifest_path}")
