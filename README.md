@@ -2,6 +2,8 @@
 
 > 从 SRT 字幕到完整 Remotion 视频的端到端工作流。支持 MCP 驱动、多 Provider TTS 语音合成、异步任务队列、实时 Web 控制台。
 
+> **Provenance | 来源**：改编自 B 站 [YangAgent](https://space.bilibili.com/) 分享的 Remotion 视频生成方案，在原工作流基础上重构为 MCP + 异步队列架构。
+
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue)]()
 [![MCP](https://img.shields.io/badge/MCP-17%20tools-green)]()
 [![SQLite](https://img.shields.io/badge/SQLite-WAL-orange)]()
