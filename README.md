@@ -7,7 +7,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue)]()
 [![MCP](https://img.shields.io/badge/MCP-17%20tools-green)]()
 [![SQLite](https://img.shields.io/badge/SQLite-WAL-orange)]()
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow)]()
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
 ---
 
