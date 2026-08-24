@@ -209,4 +209,4 @@ npx tsx --test server/core/tests/storage.test.ts server/core/tests/advanced.test
 
 ## License
 
-MIT © 2025 [techdou](https://github.com/techdou)
+MIT © 2026 [techdou](https://github.com/techdou)
